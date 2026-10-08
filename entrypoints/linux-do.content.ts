@@ -1,6 +1,8 @@
+import { copyToClipboard } from '../utils/clipboard';
+
 export default defineContentScript({
   matches: ['*://linux.do/*'],
-  main() {
+  main(ctx) {
     // Inject CSS styles
     const style = document.createElement('style');
     style.textContent = `
@@ -46,10 +48,15 @@ export default defineContentScript({
     toast.className = 'linux-do-tooltip';
     document.body.appendChild(toast);
 
+    let toastTimer: ReturnType<typeof setTimeout> | undefined;
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
+
     function showToast(message: string) {
+      clearTimeout(toastTimer);
       toast.textContent = message;
       toast.classList.add('show');
-      setTimeout(() => {
+      toastTimer = setTimeout(() => {
         toast.classList.remove('show');
       }, 2000);
     }
@@ -79,15 +86,13 @@ export default defineContentScript({
         return;
       }
 
-      // Find the like button to insert before it
-      const likeButton = controls.querySelector('.widget-button.like, .like-count');
-
       // Create first button (copy text only)
       const copyTextOnlyBtn = document.createElement('button');
       copyTextOnlyBtn.className = 'widget-button btn-flat linux-do-copy-btn btn';
       copyTextOnlyBtn.innerHTML = copyTextOnlyIcon;
       copyTextOnlyBtn.title = 'Copy post text only';
       copyTextOnlyBtn.type = 'button';
+      copyTextOnlyBtn.setAttribute('aria-label', copyTextOnlyBtn.title);
 
       // Create second button (copy with link)
       const copyWithLinkBtn = document.createElement('button');
@@ -95,6 +100,7 @@ export default defineContentScript({
       copyWithLinkBtn.innerHTML = copyWithLinkIcon;
       copyWithLinkBtn.title = 'Copy post with link';
       copyWithLinkBtn.type = 'button';
+      copyWithLinkBtn.setAttribute('aria-label', copyWithLinkBtn.title);
 
       // Add click handlers
       copyTextOnlyBtn.addEventListener('click', async (e) => {
@@ -105,9 +111,9 @@ export default defineContentScript({
 
         if (postText) {
           const success = await copyToClipboard(postText);
-          if (success) {
-            showToast('Copied text!');
-          }
+          showToast(success ? 'Copied text!' : 'Failed to copy');
+        } else {
+          showToast('No post text to copy');
         }
       });
 
@@ -120,8 +126,8 @@ export default defineContentScript({
 
         if (postText && postUrl) {
           const copyText = `${postText}\n${postUrl}\n#Linuxdo`;
-          await copyToClipboard(copyText);
-          showToast('Copied with link!');
+          const success = await copyToClipboard(copyText);
+          showToast(success ? 'Copied with link!' : 'Failed to copy');
         } else {
           showToast('Failed to copy');
         }
@@ -144,18 +150,11 @@ export default defineContentScript({
       for (const selector of contentSelectors) {
         const content = post.querySelector(selector);
         if (content) {
-          let text = content.textContent?.trim() || '';
-          text = text.replace(/\s+/g, ' ').trim();
+          const text = (content instanceof HTMLElement ? content.innerText : content.textContent)?.trim() || '';
           if (text.length > 0) {
             return text;
           }
         }
-      }
-
-      // Last resort: get text from post itself
-      const text = post.textContent?.trim() || '';
-      if (text.length > 0) {
-        return text.replace(/\s+/g, ' ').trim();
       }
 
       return null;
@@ -204,29 +203,6 @@ export default defineContentScript({
       return url;
     }
 
-    async function copyToClipboard(text: string): Promise<boolean> {
-      try {
-        await navigator.clipboard.writeText(text);
-        return true;
-      } catch (err) {
-        // Fallback for older browsers
-        const textArea = document.createElement('textarea');
-        textArea.value = text;
-        textArea.style.position = 'fixed';
-        textArea.style.left = '-999999px';
-        document.body.appendChild(textArea);
-        textArea.select();
-        try {
-          document.execCommand('copy');
-          document.body.removeChild(textArea);
-          return true;
-        } catch (err) {
-          document.body.removeChild(textArea);
-          return false;
-        }
-      }
-    }
-
     // Function to process existing posts
     function processPosts() {
       // Try multiple selectors to find posts
@@ -252,7 +228,7 @@ export default defineContentScript({
     }
 
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', init);
+      ctx.addEventListener(document, 'DOMContentLoaded', init, { once: true });
     } else {
       init();
     }
@@ -262,6 +238,9 @@ export default defineContentScript({
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
           if (node instanceof Element) {
+            // Controls may be mounted after the post itself.
+            const containingPost = node.closest('.topic-post, article, .post');
+            if (containingPost) addCopyButtons(containingPost);
             // Check if the added node is a post
             if (node.classList?.contains('topic-post') ||
                 node.tagName === 'ARTICLE' ||
@@ -277,6 +256,14 @@ export default defineContentScript({
           }
         });
       });
+    });
+
+    ctx.onInvalidated(() => {
+      observer.disconnect();
+      clearTimeout(toastTimer);
+      style.remove();
+      toast.remove();
+      document.querySelectorAll('.linux-do-copy-btn').forEach(button => button.remove());
     });
 
     // Start observing

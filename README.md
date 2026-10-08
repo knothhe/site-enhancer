@@ -1,4 +1,4 @@
-# Copy Enhancer
+# site-enhancer
 
 A browser extension that adds quick copy buttons to posts on X.com, Twitter, and linux.do.
 
@@ -8,7 +8,7 @@ A browser extension that adds quick copy buttons to posts on X.com, Twitter, and
 - **Copy with Link** - Copies tweet content, URL, and #X hashtag in one click
 - **Copy Text Only** - Copies just the tweet text content
 - **Visual Feedback** - Toast notification confirms successful copy
-- **Auto-injection** - Buttons automatically appear on dynamically loaded tweets
+- **Native menu integration** - Copy actions appear in the More menu, including dynamically loaded tweets
 
 ### For linux.do
 - **Copy with Link** - Copies post content and URL with #Linuxdo hashtag
@@ -19,13 +19,15 @@ A browser extension that adds quick copy buttons to posts on X.com, Twitter, and
 ## How It Works
 
 ### On X.com / Twitter
-The extension adds two copy buttons to the action bar below each tweet:
+The extension adds two copy actions to the native **More (⋯)** menu on each tweet:
 
-1. 🔗 **Link Icon** - Copies with link
+1. 🔗 **Copy post with link** - Copies with link
    - Format: `Tweet content` + `Tweet URL` + `#X`
 
-2. 📄 **Document Icon** - Copies text only
-   - Format: Just the tweet text
+2. 📄 **Copy post text only** - Copies text only
+   - Format: Just the tweet text, preserving line breaks and emoji
+
+Menu labels follow the page language (Chinese or English) and colors follow the native menu. Media-only posts can be copied with their link. For long posts, expand **Show more** before copying; the extension copies the currently rendered text.
 
 ### On linux.do
 The extension adds two copy buttons below each forum post:
@@ -105,7 +107,7 @@ pnpm install:local
 # Check TypeScript
 pnpm compile
 
-# Run regression tests (Node.js 18+)
+# Run regression tests (Node.js 22.18+)
 pnpm test
 
 # Run local installer behavior tests only (Node.js 18+)

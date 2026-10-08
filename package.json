@@ -1,5 +1,5 @@
 {
-  "name": "copy-enhancer",
+  "name": "site-enhancer",
   "description": "Quick copy buttons for X.com, Twitter, and linux.do",
   "private": true,
   "version": "0.1.4",
@@ -9,12 +9,12 @@
     "dev:firefox": "wxt -b firefox",
     "build": "wxt build",
     "build:firefox": "wxt build -b firefox",
+    "install:local": "node scripts/install-local.mjs",
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
-    "install:local": "node scripts/install-local.mjs",
-    "test": "node --test scripts/tests/install-local.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.ts scripts/tests/install-local.mjs",
     "test:install-local": "node --test scripts/tests/install-local.mjs"
   },
   "dependencies": {
@@ -25,6 +25,7 @@
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@wxt-dev/module-react": "^1.1.5",
+    "happy-dom": "^20.14.5",
     "typescript": "^5.9.3",
     "wxt": "^0.20.6"
   }
