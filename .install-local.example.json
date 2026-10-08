@@ -1,0 +1,8 @@
+{
+  "browser": "chrome",
+  "name": "site-enhancer",
+  "package_manager": "pnpm",
+  "directories": {
+    "chrome": "~/ChromeExtensions"
+  }
+}

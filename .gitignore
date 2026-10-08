@@ -14,6 +14,10 @@ stats-*.json
 .wxt
 web-ext.config.ts
 
+# Personal local installation configuration (including --config variants)
+/.install-local*.json
+!/.install-local.example.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

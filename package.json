@@ -12,7 +12,10 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "wxt prepare",
+    "install:local": "node scripts/install-local.mjs",
+    "test": "node --test scripts/tests/install-local.mjs",
+    "test:install-local": "node --test scripts/tests/install-local.mjs"
   },
   "dependencies": {
     "react": "^19.2.3",
