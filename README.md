@@ -52,38 +52,9 @@ The extension adds two copy buttons below each forum post:
    pnpm build
    ```
 4. Load the extension in your browser:
-   - Chrome/Edge: Go to `chrome://extensions/` or `edge://extensions/`, enable Developer mode, and load the `.output/chrome-mv3` directory
-   - Firefox: Run `pnpm build:firefox`, go to `about:debugging`, click "This Firefox", and load the temporary add-on from `.output/firefox-mv2/manifest.json`
-
-### Local Installation Directory
-
-To keep Chrome loading from a fixed directory, copy the example configuration and edit the installation parent directory:
-
-```bash
-cp .install-local.example.json .install-local.json
-# Edit .install-local.json, then build and sync
-pnpm install:local
-```
-
-The example uses Chrome and the stable plugin folder name `site-enhancer`. With `directories.chrome` set to `~/ChromeExtensions`, the actual target is `~/ChromeExtensions/site-enhancer`. Personal `.install-local.json` and `.install-local.<name>.json` files are Git-ignored; keep other personal `--config` files ignored too.
-
-You can also install without a configuration file:
-
-```bash
-pnpm install:local chrome --dir "~/ChromeExtensions" --name site-enhancer
-pnpm install:local --config .install-local.dev.json
-pnpm install:local --help
-```
-
-CLI options override configuration. `--dir` and `directories` are **parent directories**, with the plugin name appended. Relative paths resolve from the repository root; `~/` is supported. The name comes from `--name`, then configuration `name`, then the project folder name, so pass `--name site-enhancer` when installing without configuration from a differently named worktree. The name must be a single valid folder name and does not change the manifest name or extension ID. Optional configuration fields `package_manager`, `build_scripts` and `output_directories` can select existing build scripts and MV3 output directories inside the project.
-
-The command runs `pnpm build`, checks `.output/chrome-mv3/manifest.json`, then replaces only the named plugin directory. It preserves parent files and other plugins, removes obsolete plugin assets and retains the previous installation if the build or manifest validation fails. New, empty and same-project/same-browser managed directories update directly. Other nonempty plugin directories display the full target and request overwrite confirmation `[Y/n]`; declining, closing stdin or interrupting cancels before building. Managed plugin directories contain `.h2-ext-local.json` and must not contain personal files. Targets overlapping the repository or using a symlink are rejected. Failed replacement attempts restore the old directory or report its retained backup location.
-
-Production builds and ZIP commands share a process lock to prevent overlapping WXT builds from deleting each other's output. A concurrent build waits for up to two minutes. Locks are released when the build process exits; a lock left by a forced kill expires after two minutes.
-
-After synchronization, open `chrome://extensions/`, enable Developer mode and load the **installed plugin directory**. Reload the extension after each update. Directory synchronization does not load or reload it in the browser. Edge can manually load the same Chrome build at `edge://extensions/`.
-
-This project's configured local installation flow is Chrome MV3. The generic installer accepts Chrome, Firefox and Edge build mappings, but Firefox currently builds MV2 and no dedicated Edge build script exists. Do not use `install:local firefox` or `install:local edge` without first adapting and validating their MV3 build mappings. Use the existing Firefox manual installation instructions above.
+   - Chrome: Go to `chrome://extensions/`, enable Developer mode, and load the `.output/chrome-mv3` directory
+   - Edge: Run `pnpm build:edge`, then load `.output/edge-mv3` from `edge://extensions/`
+   - Firefox: Run `pnpm build:firefox` and load `.output/firefox-mv2/manifest.json` from `about:debugging`. For MV3, run `pnpm build:firefox:mv3` and load `.output/firefox-mv3/manifest.json`.
 
 ## Development
 
@@ -120,6 +91,82 @@ pnpm zip
 ```
 
 Project conventions are maintained in [AGENTS.md](AGENTS.md), with [CLAUDE.md](CLAUDE.md) referring to the same rules. Installer changes require behavior tests and a real build-and-sync check in a temporary directory outside the repository. Browser verification follows the macOS launch permissions documented there.
+
+## Local installation
+
+See the [local installation guide](docs/local-install.md).
+
+## Releases
+
+Use the project's Node.js and pnpm environment, Git, and the GitHub CLI (`gh`).
+Install dependencies with `pnpm install` and sign in with `gh auth login` before
+applying a release. Run releases on `main` with a clean working tree, including
+untracked files. Commit the release scripts, configuration, and other intended
+changes before the first preview.
+
+```bash
+# Preview a patch release without changing files or running checks
+pnpm release patch
+
+# Apply a patch release after reviewing the preview
+pnpm release patch --apply
+
+# Preview a feature release or a breaking release
+pnpm release minor
+pnpm release major
+
+# Preview an explicit version
+pnpm release 0.2.0
+
+# Apply without creating a GitHub Release
+pnpm release patch --apply --no-github-release
+
+# Create only the local version commit and tag
+pnpm release patch --apply --no-push --no-github-release
+```
+
+Choose `patch` for compatible fixes, `minor` for compatible new functionality,
+and `major` for incompatible public API changes. Review compatibility explicitly
+while this project is on `0.x`. The command defaults to preview; only `--apply`
+performs a release.
+
+[.release.json](.release.json) configures `package.json` as the single version
+source, branch `main`, remote `origin`, tag prefix `v`, and GitHub Release creation
+enabled by default. The release runs `pnpm compile` and `pnpm test:release` before
+updating the version. It then commits the version as `chore(release): vX.Y.Z`,
+creates an annotated tag, atomically pushes `main` and that tag, and creates the
+GitHub Release. This push also includes any existing unpushed commits on `main`.
+Release notes contain a Full Changelog link and commit titles with short hashes
+since the previous reachable lower version tag. Keep full Git history and tags
+available for generating these notes.
+
+The preview reports the current and target versions, tag, checks, push setting,
+GitHub repository, and release notes. For example, a patch preview from `0.1.4`
+targets `0.1.5` and `v0.1.5`, with checks before the bump and GitHub Release enabled.
+Preview reads remote refs but does not run checks or verify GitHub authentication.
+
+If a `pnpm-workspace.yaml` is present for build permissions, the command uses
+pnpm's package inventory to confirm this remains a single-package project.
+It refuses multiple packages. The pnpm lockfile has no root package version
+to update. Adapt the release workflow if the repository becomes a monorepo.
+
+This command does not build or upload extension ZIPs, publish to a package
+registry or extension store, or install a GitHub Actions workflow. Use the existing
+`pnpm build` and `pnpm zip` commands when packaging is needed.
+
+If checks fail or change repository files or Git state, the release stops before
+changing the version and leaves the check's changes for inspection. Later
+failures also leave their state intact. Inspect `git status`, commits, local tags,
+and remote refs before retrying. When the expected release commit and annotated
+tag already exist at HEAD, resume using the exact version instead of bumping again:
+
+```bash
+pnpm release 0.1.5 --resume        # Preview recovery
+pnpm release 0.1.5 --resume --apply
+```
+
+Resume requires a clean working tree and skips version changes and checks. It
+finishes the push and GitHub Release creation, preserving any existing Release.
 
 ## Tech Stack
 

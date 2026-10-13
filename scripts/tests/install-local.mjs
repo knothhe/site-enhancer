@@ -45,7 +45,7 @@ function cliFixture(t) {
     `)
   fs.writeFileSync(path.join(f.root, "package.json"), JSON.stringify({ scripts: {
     "build": "node build.mjs chrome",
-    "build:firefox": "node build.mjs firefox",
+    "build:firefox:mv3": "node build.mjs firefox",
     "build:edge": "node build.mjs edge",
   } }))
   const cli = (browser = "chrome", input = "", name) => {
@@ -83,7 +83,7 @@ for (const browser of ["chrome", "firefox", "edge"]) {
     `)
     fs.writeFileSync(path.join(f.root, "package.json"), JSON.stringify({ scripts: {
       "build": "node build.mjs chrome",
-      "build:firefox": "node build.mjs firefox",
+      "build:firefox:mv3": "node build.mjs firefox",
       "build:edge": "node build.mjs edge",
     } }))
     const result = spawnSync(process.execPath, [path.join(scripts, "install-local.mjs"), browser, "--dir", f.directory], { cwd: f.folder, encoding: "utf8" })

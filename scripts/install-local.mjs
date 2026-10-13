@@ -150,7 +150,8 @@ function settings(config, root) {
 }
 
 function build(browser, root, options) {
-  const script = options.buildScripts[browser] ?? (browser === "chrome" ? "build" : `build:${browser}`)
+  const defaults = { chrome: "build", firefox: "build:firefox:mv3", edge: "build:edge" }
+  const script = options.buildScripts[browser] ?? defaults[browser]
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
   requireThat(typeof pkg.scripts?.[script] === "string", `Missing build script: ${script}. Configure build_scripts for ${browser}.`)
   const command = options.packageManager + (process.platform === "win32" ? ".cmd" : "")

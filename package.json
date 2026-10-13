@@ -15,7 +15,11 @@
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "node --experimental-strip-types --test tests/*.test.ts scripts/tests/install-local.mjs",
-    "test:install-local": "node --test scripts/tests/install-local.mjs"
+    "test:install-local": "node --test scripts/tests/install-local.mjs",
+    "build:firefox:mv3": "wxt build -b firefox --mv3",
+    "build:edge": "wxt build -b edge --mv3",
+    "release": "node scripts/release.mjs",
+    "test:release": "node --test scripts/release.test.mjs"
   },
   "dependencies": {
     "react": "^19.2.3",

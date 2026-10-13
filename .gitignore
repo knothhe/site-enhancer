@@ -12,6 +12,7 @@ node_modules
 stats.html
 stats-*.json
 .wxt
+/.install-local.json
 web-ext.config.ts
 
 # Personal local installation configuration (including --config variants)
