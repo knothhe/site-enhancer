@@ -4,6 +4,15 @@ A browser extension that adds quick copy buttons to posts on X.com, Twitter, and
 
 ## Features
 
+### Popup: copy the current webpage URL
+- **复制干净链接** — Removes known tracking parameters such as `utm_*`, `fbclid`, and `gclid`, while preserving useful parameters and their original encoding. Also removes X/Twitter share parameters and YouTube's `si` share identifier on their respective domains.
+- **复制无参数链接** — Removes the entire query string. Search, filter, or pagination state may be lost.
+- Both actions preserve the full fragment (including hash routes) and work on HTTP/HTTPS pages. Fragment contents are not rewritten.
+- Click the extension toolbar icon to open the two-button panel. Copy confirmation appears in the selected button; failures can be retried. Processing happens locally.
+- The popup uses `activeTab` to read the page only when invoked and `clipboardWrite` to copy. It does not require permission to read every tab.
+
+The popup design and its loading, success, and failure states can be reviewed at [design/index.html](design/index.html).
+
 ### For X.com / Twitter
 - **Copy with Link** - Copies tweet content, URL, and #X hashtag in one click
 - **Copy Text Only** - Copies just the tweet text content
@@ -56,6 +65,14 @@ The extension adds two copy buttons below each forum post:
    - Edge: Run `pnpm build:edge`, then load `.output/edge-mv3` from `edge://extensions/`
    - Firefox: Run `pnpm build:firefox` and load `.output/firefox-mv2/manifest.json` from `about:debugging`. For MV3, run `pnpm build:firefox:mv3` and load `.output/firefox-mv3/manifest.json`.
 
+### Local Installation Directory
+
+Run `make install` to build and sync Chrome MV3 to the configured plugin directory. The existing `pnpm install:local` command remains available. See [local installation](docs/install-local.md) for setup, flags, overwrite rules and browser loading instructions.
+
+## Version Management
+
+Run `make version` to show the current version, `make release` to preview the next patch, and `make release VERSION_BUMP=minor RELEASE_FLAGS=--apply` to execute an upgrade with checks, an annotated tag, an atomic push and a GitHub Release. Commit the intended changes first; releases require a clean `main` branch. See [release workflow and recovery](docs/release.md).
+
 ## Development
 
 ```bash
@@ -75,7 +92,7 @@ pnpm build
 pnpm build:firefox
 
 # Build and sync Chrome to the configured local plugin directory
-pnpm install:local
+make install
 
 # Check TypeScript
 pnpm compile
@@ -86,87 +103,14 @@ pnpm test
 # Run local installer behavior tests only (Node.js 18+)
 pnpm test:install-local
 
+# Run isolated release workflow tests
+pnpm test:release
+
 # Create zip package
 pnpm zip
 ```
 
 Project conventions are maintained in [AGENTS.md](AGENTS.md), with [CLAUDE.md](CLAUDE.md) referring to the same rules. Installer changes require behavior tests and a real build-and-sync check in a temporary directory outside the repository. Browser verification follows the macOS launch permissions documented there.
-
-## Local installation
-
-See the [local installation guide](docs/local-install.md).
-
-## Releases
-
-Use the project's Node.js and pnpm environment, Git, and the GitHub CLI (`gh`).
-Install dependencies with `pnpm install` and sign in with `gh auth login` before
-applying a release. Run releases on `main` with a clean working tree, including
-untracked files. Commit the release scripts, configuration, and other intended
-changes before the first preview.
-
-```bash
-# Preview a patch release without changing files or running checks
-pnpm release patch
-
-# Apply a patch release after reviewing the preview
-pnpm release patch --apply
-
-# Preview a feature release or a breaking release
-pnpm release minor
-pnpm release major
-
-# Preview an explicit version
-pnpm release 0.2.0
-
-# Apply without creating a GitHub Release
-pnpm release patch --apply --no-github-release
-
-# Create only the local version commit and tag
-pnpm release patch --apply --no-push --no-github-release
-```
-
-Choose `patch` for compatible fixes, `minor` for compatible new functionality,
-and `major` for incompatible public API changes. Review compatibility explicitly
-while this project is on `0.x`. The command defaults to preview; only `--apply`
-performs a release.
-
-[.release.json](.release.json) configures `package.json` as the single version
-source, branch `main`, remote `origin`, tag prefix `v`, and GitHub Release creation
-enabled by default. The release runs `pnpm compile` and `pnpm test:release` before
-updating the version. It then commits the version as `chore(release): vX.Y.Z`,
-creates an annotated tag, atomically pushes `main` and that tag, and creates the
-GitHub Release. This push also includes any existing unpushed commits on `main`.
-Release notes contain a Full Changelog link and commit titles with short hashes
-since the previous reachable lower version tag. Keep full Git history and tags
-available for generating these notes.
-
-The preview reports the current and target versions, tag, checks, push setting,
-GitHub repository, and release notes. For example, a patch preview from `0.1.4`
-targets `0.1.5` and `v0.1.5`, with checks before the bump and GitHub Release enabled.
-Preview reads remote refs but does not run checks or verify GitHub authentication.
-
-If a `pnpm-workspace.yaml` is present for build permissions, the command uses
-pnpm's package inventory to confirm this remains a single-package project.
-It refuses multiple packages. The pnpm lockfile has no root package version
-to update. Adapt the release workflow if the repository becomes a monorepo.
-
-This command does not build or upload extension ZIPs, publish to a package
-registry or extension store, or install a GitHub Actions workflow. Use the existing
-`pnpm build` and `pnpm zip` commands when packaging is needed.
-
-If checks fail or change repository files or Git state, the release stops before
-changing the version and leaves the check's changes for inspection. Later
-failures also leave their state intact. Inspect `git status`, commits, local tags,
-and remote refs before retrying. When the expected release commit and annotated
-tag already exist at HEAD, resume using the exact version instead of bumping again:
-
-```bash
-pnpm release 0.1.5 --resume        # Preview recovery
-pnpm release 0.1.5 --resume --apply
-```
-
-Resume requires a clean working tree and skips version changes and checks. It
-finishes the push and GitHub Release creation, preserving any existing Release.
 
 ## Tech Stack
 

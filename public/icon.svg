@@ -1,10 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <g transform="translate(16, 36) scale(2.0)">
-    <rect x="20" y="30" width="160" height="200" rx="8" stroke="#94A3B8" stroke-width="12" fill="none"/>
-    <rect x="50" y="0" width="160" height="200" rx="8" stroke="#1D9BF0" stroke-width="12" fill="none"/>
-    <line x1="80" y1="50" x2="180" y2="50" stroke="#1D9BF0" stroke-width="8" stroke-linecap="round"/>
-    <line x1="80" y1="80" x2="180" y2="80" stroke="#1D9BF0" stroke-width="8" stroke-linecap="round"/>
-    <line x1="80" y1="110" x2="180" y2="110" stroke="#1D9BF0" stroke-width="8" stroke-linecap="round"/>
-    <line x1="80" y1="140" x2="140" y2="140" stroke="#1D9BF0" stroke-width="8" stroke-linecap="round"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="background" x1="16" y1="8" x2="112" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7562EF"/>
+      <stop offset="1" stop-color="#4938B8"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#background)"/>
+  <path d="M64 34H42C36.477 34 32 38.477 32 44V86C32 91.523 36.477 96 42 96H84C89.523 96 94 91.523 94 86V70"
+    stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M48 59H62M48 76H76" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round"/>
+  <path d="M90 17L95.768 33.232L112 39L95.768 44.768L90 61L84.232 44.768L68 39L84.232 33.232Z" fill="#9AF4D3"/>
 </svg>

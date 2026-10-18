@@ -3,7 +3,11 @@
   "branch": "main",
   "remote": "origin",
   "tag_prefix": "v",
-  "checks": [["pnpm", "compile"], ["pnpm", "test:release"]],
-  "check_phase": "before-bump",
+  "checks": [
+    ["pnpm", "test"],
+    ["pnpm", "compile"],
+    ["pnpm", "build"]
+  ],
+  "check_phase": "after-bump",
   "github_release": true
 }

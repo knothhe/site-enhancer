@@ -14,12 +14,12 @@
     "zip:firefox": "wxt zip -b firefox",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
-    "test": "node --experimental-strip-types --test tests/*.test.ts scripts/tests/install-local.mjs",
+    "test": "node --experimental-strip-types --test tests/*.test.ts scripts/release.test.mjs scripts/tests/*.mjs",
     "test:install-local": "node --test scripts/tests/install-local.mjs",
+    "test:release": "node --test scripts/release.test.mjs scripts/tests/release.mjs",
     "build:firefox:mv3": "wxt build -b firefox --mv3",
     "build:edge": "wxt build -b edge --mv3",
-    "release": "node scripts/release.mjs",
-    "test:release": "node --test scripts/release.test.mjs"
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "react": "^19.2.3",

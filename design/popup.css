@@ -1,0 +1,195 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f5;
+  --surface: #fff;
+  --text: #202a25;
+  --muted: #68756e;
+  --border: #dce3dd;
+  --border-soft: #e8ece8;
+  --button-border: #d1dbd3;
+  --well: #f6f8f5;
+  --accent: #276548;
+  --accent-hover: #1d5239;
+  --accent-soft: #eaf3ec;
+  --on-accent: #fff;
+  --focus: #a8cdb5;
+  --error: #ae412b;
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 300px;
+  min-width: 300px;
+}
+
+p, h1, h2 {
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171d19;
+    --surface: #202923;
+    --text: #e6eee8;
+    --muted: #a3b1a7;
+    --border: #36423a;
+    --border-soft: #354039;
+    --button-border: #4c5b50;
+    --well: #19211c;
+    --accent: #a1d6b2;
+    --accent-hover: #bce7c9;
+    --accent-soft: #2b4333;
+    --on-accent: #183824;
+    --focus: #59836a;
+    --error: #ffb6a4;
+  }
+
+}
+
+.popup {
+  width: 300px;
+  max-width: 100%;
+  padding: 16px;
+}
+
+.popup-header {
+  margin-bottom: 10px;
+}
+
+h1 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.page-domain {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 3px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.copy-row + .copy-row {
+  border-top: 1px solid var(--border);
+}
+
+.copy-description {
+  min-width: 0;
+}
+
+.copy-description h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.copy-description p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 3px 0 0;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+.copy-button {
+  flex: none;
+  min-width: 64px;
+  min-height: 32px;
+  padding: 6px 9px;
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+  text-align: center;
+}
+
+.copy-button:hover {
+  background: var(--well);
+}
+
+.copy-button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.copy-button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.copy-button.is-copied {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-soft);
+}
+
+button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.feedback {
+  min-height: 17px;
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--error);
+}
+
+.empty-message {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 4px 0 12px;
+  line-height: 1.7;
+}
+
+.retry-button {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--button-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

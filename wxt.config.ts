@@ -8,6 +8,9 @@ let buildLocked = false;
 // See https://wxt.dev/api/config.html
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
+  manifest: {
+    permissions: ['activeTab', 'clipboardWrite'],
+  },
   hooks: {
     async 'build:before'(wxt) {
       if (wxt.config.command !== 'build' || buildLocked) return;
