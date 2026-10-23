@@ -11,6 +11,12 @@ A browser extension that adds quick copy buttons to posts on X.com, Twitter, and
 - Click the extension toolbar icon to open the two-button panel. Copy confirmation appears in the selected button; failures can be retried. Processing happens locally.
 - The popup uses `activeTab` to read the page only when invoked and `clipboardWrite` to copy. It does not require permission to read every tab.
 
+### Popup: download text and JSON
+- HTTP/HTTPS responses reported by the browser as `text/plain`, `application/json`, `text/json`, or an `application/*+json` type show an additional **下载** button. HTML pages, including pages containing code blocks or ending in `.txt` or `.json`, do not qualify based on their URL or content alone.
+- The button saves the currently loaded text as UTF-8 through the browser's download manager, preserving whitespace and line breaks. It does not request the website again or parse and reformat JSON. The URL's last path segment supplies the filename; JSON responses always use `.json`, while plain text keeps its existing extension or gets `.txt`.
+- Files use the browser's download location and duplicate names receive a unique suffix. Browser settings may still prompt for a location. **已开始** means the download was handed to the browser; check the browser's download list for completion. Reopen the popup if the page has navigated or refreshed.
+- `scripting` and the temporary `activeTab` grant detect and read the current document. `downloads` starts the local download. No additional access to all websites is requested.
+
 The popup design and its loading, success, and failure states can be reviewed at [design/index.html](design/index.html).
 
 ### For X.com / Twitter

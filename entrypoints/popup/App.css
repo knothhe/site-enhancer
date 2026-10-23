@@ -40,6 +40,12 @@ h1 {
   min-width: 0;
 }
 
+.copy-description .download-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .copy-description h2 {
   font-size: 13px;
   font-weight: 600;
