@@ -1,6 +1,6 @@
 # site-enhancer
 
-A browser extension that adds quick copy buttons to posts on X.com, Twitter, and linux.do.
+A browser extension that adds quick copy buttons to posts on X.com, Twitter, and linux.do, and offers simplified X page styles.
 
 ## Features
 
@@ -16,6 +16,16 @@ A browser extension that adds quick copy buttons to posts on X.com, Twitter, and
 - The button saves the currently loaded text as UTF-8 through the browser's download manager, preserving whitespace and line breaks. It does not request the website again or parse and reformat JSON. The URL's last path segment supplies the filename; JSON responses always use `.json`, while plain text keeps its existing extension or gets `.txt`.
 - Files use the browser's download location and duplicate names receive a unique suffix. Browser settings may still prompt for a location. **已开始** means the download was handed to the browser; check the browser's download list for completion. Reopen the popup if the page has navigated or refreshed.
 - `scripting` and the temporary `activeTab` grant detect and read the current document. `downloads` starts the local download. No additional access to all websites is requested.
+
+### Popup: X page layout and theme
+- On x.com and twitter.com the popup shows an **X 页面** section above the link actions. Layout and theme are set separately, apply immediately to open X tabs and are remembered.
+- **布局** changes only structure and typography:
+  - **原版** leaves X unchanged.
+  - **简洁** keeps the main features (Home, Explore, Notifications, Chat, Profile, More, Post and search) and hides ads, Grok, Premium/verification upsells, Creator Studio, Calls, Jobs, Communities, the sidebar's trends/sports/who-to-follow/footer modules, the post analytics upsell, and who-to-follow suggestions in the Home timeline. Post text gets slightly more line spacing.
+  - **阅读** also removes the right sidebar, view counts, History, Lists and the chat drawer, widens the timeline and uses larger serif post text.
+- **主题** changes only colors: **原版** plus 石墨, 纸墨, 森林, 海洋, 薄荷, 暮紫 and 玫瑰. Each swatch shows the theme's background and accent. Every theme has a light and a dark palette and follows X's display setting (Dim and Lights out use the dark palette). Colors are remapped from X's live stylesheet, so newly loaded content is recolored as well.
+- Rules match X's link targets and `data-testid` attributes, so they work in any interface language. Ads are detected as posts without a timestamp. The settings use the `storage` permission.
+- Link and download rows show only their title and action; detailed explanations are available as tooltips.
 
 The popup design and its loading, success, and failure states can be reviewed at [design/index.html](design/index.html).
 

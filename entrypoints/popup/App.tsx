@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { browser } from 'wxt/browser';
 import { copyToClipboard } from '../../utils/clipboard';
 import { getUrlVariants, type UrlVariants } from '../../utils/url';
 import { getTextDownload, getTextFilename, readTextPage, type TextPage } from '../../utils/text-download';
+import { isXHost, X_STYLE_OPTIONS, X_STYLES, type XStyle } from '../../utils/x-style';
+import { X_THEME_NAMES, X_THEMES, xThemeLabel, type XTheme } from '../../utils/x-theme';
+import { xStyleSetting, xThemeSetting } from '../../utils/x-settings';
 import './App.css';
 
 type CopyMode = 'clean' | 'bare';
@@ -12,10 +15,53 @@ type PageState =
 type CopyState = { status: 'idle' } | { status: 'copying' | 'copied' | 'failed'; mode: CopyMode };
 type DownloadState = 'idle' | 'preparing' | 'started' | 'failed';
 
+/** Loads a stored setting and saves changes optimistically, reverting on failure. */
+function useSetting<T extends string>(setting: { get(): Promise<T>; set(value: T): Promise<void> }) {
+  const [value, setValue] = useState<T>('original' as T);
+  const [failed, setFailed] = useState(false);
+  const current = useRef(value);
+  const changed = useRef(false);
+  useEffect(() => {
+    setting.get().then(stored => {
+      // Do not overwrite a choice made while the stored value was loading.
+      if (changed.current) return;
+      current.current = stored;
+      setValue(stored);
+    }, () => setFailed(true));
+  }, [setting]);
+  async function update(next: T) {
+    changed.current = true;
+    const previous = current.current;
+    current.current = next;
+    setValue(next);
+    setFailed(false);
+    try {
+      await setting.set(next);
+    } catch {
+      current.current = previous;
+      setValue(previous);
+      setFailed(true);
+    }
+  }
+  return [value, update, failed] as const;
+}
+
+const ORIGINAL_SWATCH = { light: { bg: '#ffffff', accent: '#1d9bf0' }, dark: { bg: '#000000', accent: '#1d9bf0' } };
+
+function swatchStyle(theme: XTheme): CSSProperties {
+  const colors = theme === 'original' ? ORIGINAL_SWATCH : X_THEMES[theme];
+  return {
+    '--swatch-light-bg': colors.light.bg, '--swatch-light-accent': colors.light.accent,
+    '--swatch-dark-bg': colors.dark.bg, '--swatch-dark-accent': colors.dark.accent,
+  } as CSSProperties;
+}
+
 function App() {
   const [page, setPage] = useState<PageState>({ status: 'loading' });
   const [copy, setCopy] = useState<CopyState>({ status: 'idle' });
   const [download, setDownload] = useState<DownloadState>('idle');
+  const [xStyle, setXStyle, xStyleFailed] = useSetting<XStyle>(xStyleSetting);
+  const [xTheme, setXTheme, xThemeFailed] = useSetting<XTheme>(xThemeSetting);
   const requestId = useRef(0);
   const copying = useRef(false);
   const downloading = useRef(false);
@@ -91,6 +137,7 @@ function App() {
   const isJson = ready && page.textPage?.format === 'json';
   const downloadFilename = ready && page.textPage ? getTextFilename(page.textPage.url, page.textPage.format) : '';
   const showActions = ready || page.status === 'loading';
+  const onX = ready && isXHost(page.urls.hostname);
   const feedback = copy.status === 'copied'
     ? `${copy.mode === 'clean' ? '干净链接' : '无参数链接'}已复制到剪贴板`
     : copy.status === 'failed' ? '复制失败，请重试。' : copy.status === 'copying' ? '正在复制…' : '';
@@ -98,14 +145,56 @@ function App() {
   return (
     <main className="popup">
       <header className="popup-header">
-        <h1>复制链接</h1>
-        <p className="page-domain" title={ready ? page.title : undefined}>
-          {ready ? page.urls.hostname : page.status === 'loading' ? '正在读取当前页面…'
-            : page.status === 'failed' ? '暂时无法读取页面' : '当前页面无法复制'}
-        </p>
+        <h1 title={ready ? page.title : undefined}>{ready ? page.urls.hostname : 'site-enhancer'}</h1>
+        {!ready && <p className="page-domain">
+          {page.status === 'loading' ? '正在读取当前页面…' : page.status === 'failed' ? '暂时无法读取页面' : '当前页面无法复制'}
+        </p>}
       </header>
 
+      {onX && <section className="panel-section" aria-labelledby="x-page-title">
+        <h2 className="section-title" id="x-page-title">X 页面</h2>
+        <div className="setting-row">
+          <span className="setting-label" id="x-style-label">布局</span>
+          <div className="segmented" role="radiogroup" aria-labelledby="x-style-label">
+            {X_STYLES.map(value => (
+              <label key={value} className={xStyle === value ? 'is-selected' : undefined} title={X_STYLE_OPTIONS[value].description}>
+                <input
+                  type="radio"
+                  name="x-style"
+                  value={value}
+                  checked={xStyle === value}
+                  aria-description={X_STYLE_OPTIONS[value].description}
+                  onChange={() => void setXStyle(value)}
+                />
+                <span>{X_STYLE_OPTIONS[value].label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="setting-row">
+          <span className="setting-label" id="x-theme-label">主题<b>{xThemeLabel(xTheme)}</b></span>
+          <div className="swatches" role="radiogroup" aria-labelledby="x-theme-label">
+            {X_THEME_NAMES.map(value => (
+              <label key={value} className={`swatch ${xTheme === value ? 'is-selected' : ''}`} title={xThemeLabel(value)} style={swatchStyle(value)}>
+                <input
+                  type="radio"
+                  name="x-theme"
+                  value={value}
+                  checked={xTheme === value}
+                  aria-label={xThemeLabel(value)}
+                  onChange={() => void setXTheme(value)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+        <p className={xStyleFailed || xThemeFailed ? 'section-error' : 'sr-only'} role="status" aria-live="polite">
+          {xStyleFailed || xThemeFailed ? '设置保存失败，请重试。' : ''}
+        </p>
+      </section>}
+
       {showActions ? <>
+        <h2 className="section-title">复制链接</h2>
         <div className="copy-actions">
           {(['clean', 'bare'] as const).map(mode => {
             const primary = mode === 'clean';
@@ -116,14 +205,12 @@ function App() {
               <section className="copy-row" key={mode} aria-labelledby={`${mode}-title`}>
                 <div className="copy-description">
                   <h2 id={`${mode}-title`}>{primary ? '干净链接' : '无参数链接'}</h2>
-                  <p id={`${mode}-description`}>{primary ? '去除 UTM 等追踪参数' : '移除全部查询参数'}</p>
                 </div>
                 <button
                   type="button"
                   className={`copy-button ${primary ? 'primary' : ''} ${copied ? 'is-copied' : ''}`}
                   disabled={!ready || copy.status === 'copying'}
                   aria-label={label}
-                  aria-describedby={`${mode}-description`}
                   aria-busy={busy}
                   title={primary ? '清除已知追踪项，保留其他参数与锚点' : '移除全部查询参数，保留锚点；搜索、筛选条件可能丢失'}
                   onClick={() => void handleCopy(mode)}
@@ -161,7 +248,6 @@ function App() {
           </span>
         </div>
       </> : <>
-        <p className="empty-message">{page.status === 'failed' ? '请重试，或重新打开此面板。' : '请在普通网页中打开此面板。'}</p>
         <button className="retry-button" type="button" onClick={() => void loadPage()}>重新读取</button>
       </>}
     </main>

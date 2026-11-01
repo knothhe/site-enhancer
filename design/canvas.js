@@ -11,9 +11,12 @@ window.H2_DESIGN_CANVAS = {
     { file: "popup-text-started.html", title: "08 · 已开始下载", x: 680, y: 480, w: 300, h: 310 },
     { file: "popup-text-failed.html", title: "09 · 下载失败可重试", x: 1020, y: 480, w: 300, h: 310 },
     { file: "popup-json-ready.html", title: "10 · JSON 保存为 .json", x: 1360, y: 480, w: 300, h: 310 },
+    { file: "popup-x-clean.html", title: "11 · 简洁布局 + 森林主题", x: 0, y: 940, w: 300, h: 300 },
+    { file: "popup-x-reading.html", title: "12 · 阅读布局 + 纸墨主题", x: 340, y: 940, w: 300, h: 300 },
   ],
   notes: [
     { text: "左侧链接类型与短说明，右侧复制按钮；不使用卡片。去追踪保留其他参数；无参数移除全部查询参数。两种方式保留锚点。无参数按钮悬停提示搜索、筛选可能丢失。", x: 0, y: 0, w: 900 },
     { text: "纯文本和 JSON 响应显示下载行；JSON 标为 JSON 文件并保存为 .json，包含 application/json、text/json 和 application/*+json。文件名过长时省略，悬停查看全名。原样保存已加载内容为 UTF-8，不重新请求或解析重排 JSON。下载中的等待、完成及错误恢复沿用文本下载状态。已开始只代表交给浏览器下载，路径由浏览器设置决定。页面已刷新或跳转时提示重新打开面板。", x: 0, y: 360, w: 1300 },
+    { text: "仅在 x.com / twitter.com 显示「X 页面」，位于复制链接上方，布局与主题分开设置。布局只改排版：原版不改动；简洁隐藏广告、Grok、Premium 和推荐模块，保留搜索；阅读移除右侧栏、浏览量与私信抽屉，时间线加宽并使用衬线大字。主题只改颜色：原版加石墨、纸墨、森林、海洋、薄荷、暮紫、玫瑰七套配色，色块显示背景与强调色，随 X 的浅色或深色模式切换。说明放在悬停提示中。", x: 0, y: 830, w: 1300 },
   ],
 };

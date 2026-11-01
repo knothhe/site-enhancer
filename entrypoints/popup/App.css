@@ -29,7 +29,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 0;
+  padding: 10px 0;
 }
 
 .copy-row + .copy-row {
@@ -117,14 +117,8 @@ button:disabled {
   color: var(--error);
 }
 
-.empty-message {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 4px 0 12px;
-  line-height: 1.7;
-}
-
 .retry-button {
+  margin-top: 4px;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--button-border);
@@ -141,4 +135,137 @@ button:disabled {
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+.panel-section {
+  padding: 2px 0 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section-title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.popup > .section-title {
+  margin-bottom: 0;
+}
+
+.setting-row {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.setting-row + .setting-row {
+  margin-top: 6px;
+}
+
+.setting-label {
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.setting-label b {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--button-border);
+  border-radius: 7px;
+  background: var(--well);
+}
+
+.segmented label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.segmented label:hover {
+  color: var(--text);
+}
+
+.segmented label.is-selected {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.segmented input,
+.swatch input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.segmented label:has(input:focus-visible),
+.swatch:has(input:focus-visible) {
+  outline: 3px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+  justify-items: center;
+}
+
+.swatch {
+  --swatch-bg: var(--swatch-light-bg);
+  --swatch-accent: var(--swatch-light-accent);
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--swatch-bg) 0 52%, var(--swatch-accent) 52% 100%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .14);
+  cursor: pointer;
+}
+
+.swatch.is-selected {
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .14), 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .swatch {
+    --swatch-bg: var(--swatch-dark-bg);
+    --swatch-accent: var(--swatch-dark-accent);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16);
+  }
+
+  .swatch.is-selected {
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / .16), 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  }
+}
+
+.section-error {
+  margin: 8px 0 0;
+  color: var(--error);
+  font-size: 11px;
+  line-height: 1.5;
 }
