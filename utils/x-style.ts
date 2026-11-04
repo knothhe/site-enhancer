@@ -1,9 +1,10 @@
-export const X_STYLES = ['original', 'clean', 'reading'] as const;
+export const X_STYLES = ['original', 'clean', 'columns', 'reading'] as const;
 export type XStyle = typeof X_STYLES[number];
 
 export const X_STYLE_OPTIONS: Record<XStyle, { label: string; description: string }> = {
   original: { label: '原版', description: '保持 X 默认布局' },
   clean: { label: '简洁', description: '隐藏广告、Grok、Premium 和推荐模块，保留搜索' },
+  columns: { label: '三栏', description: '简洁布局，右侧查看推文和回复；拖动分隔线调整栏宽，窄窗口使用原生详情' },
   reading: { label: '阅读', description: '移除侧栏和数据，时间线加宽，正文使用衬线大字' },
 };
 

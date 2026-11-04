@@ -1,6 +1,7 @@
 window.H2_DESIGN_CANVAS = {
   title: "site-enhancer · 简洁复制面板",
   boards: [
+    ...["empty", "loading", "detail", "error"].map((state, i) => ({ file: `x-three-column.html?state=${state}`, title: `三栏 · ${state}`, x: i * 1480, y: 1400, w: 1440, h: 900 })),
     { file: "popup-ready.html", title: "01 · 左侧说明，右侧复制", x: 0, y: 100, w: 300, h: 240 },
     { file: "popup-copied.html", title: "02 · 按钮内显示已复制", x: 340, y: 100, w: 300, h: 240 },
     { file: "popup-failed.html", title: "03 · 失败可重试", x: 680, y: 100, w: 300, h: 240 },

@@ -9,7 +9,8 @@ let buildLocked = false;
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
   manifest: {
-    permissions: ['activeTab', 'clipboardWrite', 'scripting', 'downloads', 'storage'],
+    host_permissions: ['https://*.x.com/*', 'https://*.twitter.com/*'],
+    permissions: ['activeTab', 'clipboardWrite', 'scripting', 'downloads', 'storage', 'declarativeNetRequestWithHostAccess'],
   },
   hooks: {
     async 'build:before'(wxt) {

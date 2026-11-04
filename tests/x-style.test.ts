@@ -21,7 +21,7 @@ const root = () => document.documentElement;
 test('recognizes X hosts and style values', () => {
   for (const host of ['x.com', 'mobile.x.com', 'twitter.com', 'www.twitter.com']) assert.ok(isXHost(host), host);
   for (const host of ['notx.com', 'x.com.evil.test', 'example.com', undefined]) assert.ok(!isXHost(host), String(host));
-  assert.deepEqual(X_STYLES.map(value => X_STYLE_OPTIONS[value].label), ['原版', '简洁', '阅读']);
+  assert.deepEqual(X_STYLES.map(value => X_STYLE_OPTIONS[value].label), ['原版', '简洁', '三栏', '阅读']);
   assert.ok(isXStyle('reading'));
   assert.ok(!isXStyle('style3'));
 });

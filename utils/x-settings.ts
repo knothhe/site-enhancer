@@ -12,7 +12,7 @@ function setting<T extends string>(key: `local:${string}`, isValid: (value: unkn
   };
 }
 
-/** Page layout and typography: original, clean or reading. */
+/** Page layout and typography: original, clean, columns or reading. */
 export const xStyleSetting = setting<XStyle>('local:xStyle', isXStyle);
 /** Page colors, independent of the layout. */
 export const xThemeSetting = setting<XTheme>('local:xTheme', isXTheme);
