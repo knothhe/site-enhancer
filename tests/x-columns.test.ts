@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { columnGeometry, parseColumnWidths, detailUrl, installXColumns, COLUMNS_WIDTH_KEY } from '../utils/x-columns.ts';
 
+import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
+
 let win: Window;
 let columns: ReturnType<typeof installXColumns> | undefined;
 beforeEach(() => {
@@ -160,4 +162,49 @@ test('detail toolbar follows the measured native header and releases its alignme
   controller.setEnabled(false);
   assert.equal(header.hasAttribute('data-site-enhancer-column-header'), false);
   assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '');
+});
+
+
+test('quote destinations are read from their own link component and normalized safely', () => {
+  const card = document.createElement('div');
+  (card as any).__reactFiber$test = { return: { memoizedProps: { link: { pathname: 'https://twitter.com/quoted/status/456' } } } };
+  assert.equal(quoteComponentPath(card), 'https://twitter.com/quoted/status/456');
+  assert.equal(normalizeQuoteUrl(quoteComponentPath(card)!, location.origin), 'https://x.com/quoted/status/456');
+  for (const url of ['https://evil.test/quoted/status/456', 'javascript:alert(1)', '/quoted/status/456/photo/1']) {
+    assert.equal(normalizeQuoteUrl(url, location.origin), undefined);
+  }
+  (card as any).__reactFiber$test = { return: { stateNode: document.createElement('div'), memoizedProps: { link: { pathname: '/outer/status/123' } } } };
+  assert.equal(quoteComponentPath(card), undefined);
+});
+
+test('timeline quote clicks open the quote and unavailable cards retain native behavior', () => {
+  start();
+  document.querySelector('article')!.insertAdjacentHTML('beforeend', '<div role="link" id="quote"><div data-testid="tweetText">Quote</div></div>');
+  const card = document.querySelector('#quote')!;
+  assert.equal(click('#quote').defaultPrevented, false);
+  assert.equal(document.querySelector('iframe'), null);
+  card.addEventListener(QUOTE_REQUEST, () => card.setAttribute(QUOTE_URL, '/quoted/status/456'));
+  assert.equal(click('#quote [data-testid="tweetText"]').defaultPrevented, true);
+  assert.equal(document.querySelector('iframe')?.src, 'https://x.com/quoted/status/456');
+  assert.equal(card.hasAttribute(QUOTE_URL), false);
+  assert.equal(location.pathname, '/home');
+});
+
+test('quotes inside the detail document replace details instead of reopening their parent', t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  start();
+  click('time');
+  const frame = document.querySelector('iframe')!;
+  const detailWindow = new Window({ url: 'https://x.com/alice/status/123' });
+  t.after(() => detailWindow.happyDOM.close());
+  const doc = detailWindow.document;
+  Object.defineProperty(frame, 'contentDocument', { value: doc });
+  doc.body.innerHTML = '<div data-testid="primaryColumn"><article data-testid="tweet"><a href="https://x.com/alice/status/123"><time>Now</time></a><div role="link" id="quote">Quoted post</div></article></div>';
+  const card = doc.querySelector('#quote')!;
+  card.addEventListener(QUOTE_REQUEST, () => card.setAttribute(QUOTE_URL, '/quoted/status/456'));
+  t.mock.timers.tick(250);
+  card.dispatchEvent(new detailWindow.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  assert.equal(document.querySelector('iframe')?.src, 'https://x.com/quoted/status/456');
+  assert.notEqual(document.querySelector('iframe'), frame);
+  assert.equal(location.pathname, '/home');
 });

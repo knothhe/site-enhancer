@@ -72,11 +72,11 @@ test('injects only into the tweet More menu and handles rerender without duplica
   assert.equal(unrelated.querySelectorAll('.site-enhancer-menuitem').length, 0);
   unrelated.remove();
   const portal = await open(article);
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 2);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
   assert.ok(portal.querySelector('.site-enhancer-menu-height'));
   portal.querySelector('[data-testid="Dropdown"]')!.appendChild(document.createElement('span'));
   await flush();
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 2);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
 });
 
 test('does not duplicate actions when X wraps menu content after mounting', async () => {
@@ -93,8 +93,8 @@ test('does not duplicate actions when X wraps menu content after mounting', asyn
   dropdown.appendChild(portal.querySelector('[role="menuitem"]:not(.site-enhancer-menuitem)')!);
   portal.appendChild(dropdown);
   await flush();
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 2);
-  assert.equal(dropdown.querySelectorAll('.site-enhancer-menuitem').length, 2);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
+  assert.equal(dropdown.querySelectorAll('.site-enhancer-menuitem').length, 3);
 });
 
 test('copies the selected tweet snapshot even if its virtualized DOM is recycled', async () => {
@@ -165,4 +165,26 @@ test('includes custom items in keyboard navigation and cleans up on invalidation
   assert.equal(document.querySelector('.site-enhancer-menuitem'), null);
   assert.equal(document.querySelector('.site-enhancer-menu-height'), null);
   assert.equal(document.querySelector('[role="status"]'), null);
+});
+
+
+test('copies only the canonical URL without text, tracking or hashtag', async () => {
+  cleanup = installXCopyMenu();
+  const portal = await open(tweet());
+  const item = portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem')[2];
+  assert.equal(item.textContent, 'Copy post link');
+  item.click();
+  await flush();
+  assert.deepEqual(copied, ['https://x.com/author/status/123']);
+});
+
+test('URL-only copy reports a missing permalink instead of copying empty text', async () => {
+  const article = tweet();
+  article.querySelector('a')!.remove();
+  cleanup = installXCopyMenu();
+  const portal = await open(article);
+  portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem')[2].click();
+  await flush();
+  assert.deepEqual(copied, []);
+  assert.match(document.body.textContent!, /Post link unavailable/);
 });

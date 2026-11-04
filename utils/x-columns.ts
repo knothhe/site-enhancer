@@ -1,4 +1,5 @@
 import { installDetailHistory } from './x-detail-history.ts';
+import { resolveQuoteUrl } from './x-quote.ts';
 /** Three-column layout. The timeline remains owned by X; details use a same-origin frame. */
 export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
@@ -416,7 +417,11 @@ export function installXColumns(options: {
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;
     const link = target.closest<HTMLAnchorElement>('a[href]');
     const article = target.closest('article')!;
-    const href = link?.href ?? article.querySelector<HTMLAnchorElement>('a[href*="/status/"]:has(time)')?.href;
+    const card = target.closest('[role="link"]:not(a)');
+    // Never fall back to the outer post for an anchorless card. If X changes
+    // its component shape, leave the native card interaction intact.
+    const href = link?.href ?? (card ? resolveQuoteUrl(card, location.origin)
+      : article.querySelector<HTMLAnchorElement>('a[href*="/status/"]:has(time)')?.href);
     const url = href && detailUrl(href, location.origin);
     if (!url || link?.target === '_blank' || link?.hasAttribute('download')) return;
     event.preventDefault();

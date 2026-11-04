@@ -54,10 +54,10 @@ export function getTweetData(tweet: Element): { text: string; url: string } {
 export function installXCopyMenu(): () => void {
   const chinese = document.documentElement.lang.toLowerCase().startsWith('zh');
   const labels = chinese ? {
-    link: '复制推文和链接', text: '仅复制推文文字', copied: '已复制',
+    link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接', copied: '已复制',
     failed: '复制失败，请重试', empty: '这条推文没有可复制的文字', missing: '无法获取推文链接',
   } : {
-    link: 'Copy post with link', text: 'Copy post text only', copied: 'Copied!',
+    link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link', copied: 'Copied!',
     failed: 'Copy failed. Please try again.', empty: 'This post has no text to copy.', missing: 'Post link unavailable.',
   };
   const toast = createToast();
@@ -98,12 +98,12 @@ export function installXCopyMenu(): () => void {
     session = undefined;
   }
 
-  function createItem(kind: 'link' | 'text', current: Session) {
+  function createItem(kind: 'link' | 'text' | 'url', current: Session) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = ITEM;
     button.setAttribute('role', 'menuitem');
-    button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[kind]}"></path></svg>`;
+    button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[kind === 'url' ? 'link' : kind]}"></path></svg>`;
     const label = document.createElement('span');
     label.textContent = labels[kind];
     button.appendChild(label);
@@ -112,8 +112,8 @@ export function installXCopyMenu(): () => void {
       event.stopPropagation();
       const { text, url } = current.data;
       if (kind === 'text' && !text) { toast.show(labels.empty); return; }
-      if (kind === 'link' && !url) { toast.show(labels.missing); return; }
-      const value = kind === 'text' ? text : [text, url, '#X'].filter(Boolean).join('\n');
+      if (kind !== 'text' && !url) { toast.show(labels.missing); return; }
+      const value = kind === 'text' ? text : kind === 'url' ? url : [text, url, '#X'].filter(Boolean).join('\n');
       // Start the write within the user gesture before closing the native menu.
       const result = copyToClipboard(value);
       current.trigger.click();
@@ -153,7 +153,7 @@ export function installXCopyMenu(): () => void {
       }
     }
     const existingItems = Array.from(menu.querySelectorAll(`.${ITEM}`));
-    if (existingItems.length === 2 && existingItems.every(item => dropdown.contains(item))) return;
+    if (existingItems.length === 3 && existingItems.every(item => dropdown.contains(item))) return;
     // X can move native items into Dropdown after initially mounting the menu.
     existingItems.forEach(item => item.remove());
     const nativeItem = dropdown.querySelector<HTMLElement>('[role="menuitem"]');
@@ -161,8 +161,9 @@ export function installXCopyMenu(): () => void {
     const color = getComputedStyle(nativeItem.querySelector('span') ?? nativeItem).color;
     const link = createItem('link', current);
     const text = createItem('text', current);
-    link.style.color = text.style.color = color;
-    nativeItem.before(link, text);
+    const url = createItem('url', current);
+    link.style.color = text.style.color = url.style.color = color;
+    nativeItem.before(link, text, url);
   }
 
   const observer = new MutationObserver(syncMenu);
