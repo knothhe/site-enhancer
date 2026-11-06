@@ -9,6 +9,7 @@ export function installDetailHistory(apply: (url: string | undefined) => void, c
   const groups = new Map<number, Group>();
   let nextGroup = 0;
   let routeChanged = false;
+  let lastPage = location.href;
   let restoreTimer: ReturnType<typeof setTimeout> | undefined;
   const navigation = (window as unknown as { navigation?: EventTarget }).navigation;
   const routeChange = (event: Event) => {
@@ -23,6 +24,7 @@ export function installDetailHistory(apply: (url: string | undefined) => void, c
     return marker?.session === session && marker.page === location.href && !!group && group.page === marker.page && Number.isInteger(marker.index) && marker.index >= 0 && marker.index < group.entries.length ? marker : undefined;
   };
   function select(url: string | undefined) {
+    lastPage = location.href;
     let marker = own();
     if (!marker) {
       marker = { session, group: nextGroup++, index: 0, page: location.href };
@@ -40,10 +42,13 @@ export function installDetailHistory(apply: (url: string | undefined) => void, c
     changed();
   }
   function restore(event?: PopStateEvent) {
+    // Location-change notifications also track routes in browsers without Navigation API.
+    const pageChanged = lastPage !== location.href;
+    lastPage = location.href;
     if (!active()) return false;
     const marker = own();
     if (!marker) return false;
-    if (event && routeChanged) {
+    if (event && (routeChanged || pageChanged)) {
       // Let X render a real route transition first (e.g. Explore -> Home).
       routeChanged = false;
       clearTimeout(restoreTimer);

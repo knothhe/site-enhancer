@@ -90,15 +90,37 @@ test('native route traversal renders in X before restoring the detail pane', t =
   assert.equal(displayed, 'https://x.com/a/status/1');
 });
 
-test('detail histories from different X routes do not overwrite each other', () => {
+test('detail histories from different X routes do not overwrite each other', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   controller.select('https://x.com/a/status/1');
   const home = win.history.state;
   pop({ key: 'search-route' }, '/search?q=design');
   controller.select('https://x.com/b/status/2');
   const search = win.history.state;
   pop(home, '/home');
+  t.mock.timers.tick(1);
   assert.equal(displayed, 'https://x.com/a/status/1');
   assert.equal(controller.canBack(), true);
   pop(search, '/search?q=design');
+  t.mock.timers.tick(1);
   assert.equal(displayed, 'https://x.com/b/status/2');
+});
+
+test('native route traversal reaches X when the Navigation API is unavailable', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  controller.remove();
+  Object.defineProperty(win, 'navigation', { configurable: true, value: undefined });
+  controller = installDetailHistory(url => { displayed = url; }, () => {}, () => enabled);
+  controller.select('https://x.com/a/status/1');
+  const home = win.history.state;
+  win.history.pushState({ key: 'explore' }, '', '/explore');
+  controller.restore(); // The content script's location-change notification.
+  let nativeEvents = 0;
+  win.addEventListener('popstate', () => { nativeEvents++; });
+  pop(home, '/home');
+  assert.equal(nativeEvents, 1);
+  t.mock.timers.tick(1);
+  assert.equal(displayed, 'https://x.com/a/status/1');
+  pop(home);
+  assert.equal(nativeEvents, 1);
 });

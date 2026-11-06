@@ -46,7 +46,9 @@ ${SCOPE} [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{bord
 ${SCOPE} header[role="banner"]{width:var(--se-nav)!important;flex:0 0 var(--se-nav)!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_NewTweet_Button"]{width:calc(var(--se-nav) - 24px)!important;min-width:0!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]{max-width:var(--se-nav)!important;min-width:0!important}
-${SCOPE} header[role="banner"]>div,${SCOPE} header[role="banner"]>div>div{width:var(--se-nav)!important}
+${SCOPE} header[role="banner"]>div,${SCOPE} header[role="banner"]>div>div{width:var(--se-nav)!important;transition:none!important}
+/* X's padded inner rail has its own fixed width and otherwise covers feed links. */
+${SCOPE} header[role="banner"]>div>div>div{width:var(--se-nav)!important;box-sizing:border-box;min-width:0}
 ${SCOPE} main[role="main"]{width:var(--se-feed)!important;max-width:var(--se-feed)!important;flex:0 0 var(--se-feed)!important;margin-right:var(--se-detail)!important}
 ${SCOPE} main[role="main"]>div,${SCOPE} div:has(>[data-testid="primaryColumn"]),${SCOPE} [data-testid="primaryColumn"]{width:100%!important;max-width:100%!important;min-width:0!important}
 ${SCOPE} [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
