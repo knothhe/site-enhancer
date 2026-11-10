@@ -10,7 +10,7 @@
 // interception; every other request is blocked. Exits 1 when any assertion
 // fails. Screenshots and report.json go to the output directory.
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,11 +108,20 @@ const fixtures = {
   x: readFileSync(join(here, 'fixtures/x.html'), 'utf8'),
   'linux-do': readFileSync(join(here, 'fixtures/linux-do.html'), 'utf8'),
 };
-// Replace only artifacts this command writes; --out may point at an existing directory.
+// --out may be an existing directory: remove only the files a previous run
+// listed in its own report, so stale screenshots do not pass for new ones.
+const REPORT = 'site-enhancer-browser-regression';
+const artifacts = [];
 mkdirSync(outDir, { recursive: true });
-for (const name of readdirSync(outDir)) {
-  if (name === 'report.json' || /^(?:x|linux-do|popup)-[\w-]+\.png$/.test(name)) rmSync(join(outDir, name), { force: true });
-}
+try {
+  const previous = JSON.parse(readFileSync(join(outDir, 'report.json'), 'utf8'));
+  if (previous.tool === REPORT) {
+    for (const name of previous.artifacts ?? []) {
+      if (typeof name === 'string' && /^[\w-]+\.png$/.test(name)) rmSync(join(outDir, name), { force: true });
+    }
+    rmSync(join(outDir, 'report.json'), { force: true });
+  }
+} catch {}
 
 // -------------------------------------------------------------- browser ---
 
@@ -239,6 +248,7 @@ async function openPage({ url, width = 1000, height = 700, scale = 1, dark = fal
     async shot(name, clip) {
       const { data } = await page.send('Page.captureScreenshot', { format: 'png', ...(clip ? { clip: { ...clip, scale: 1 } } : {}) });
       writeFileSync(join(outDir, `${name}.png`), Buffer.from(data, 'base64'));
+      artifacts.push(`${name}.png`);
     },
     clipboard: () => page.eval(`return JSON.parse(document.documentElement.getAttribute('data-se-test-clipboard') || '[]');`),
     clearClipboard: () => page.eval(`document.documentElement.removeAttribute('data-se-test-clipboard');`),
@@ -498,7 +508,7 @@ const offline = blocked.filter(url => !url.startsWith('data:'));
 log(`\n${offline.length ? `Blocked ${offline.length} non-fixture request(s): ${offline.slice(0, 5).join(', ')}` : 'No non-fixture requests.'}`);
 const passed = results.filter(r => r.ok).length;
 writeFileSync(join(outDir, 'report.json'), JSON.stringify({
-  browser: browserPath, headless: !headed, extensionId: extId, passed, failed: failures, blocked: offline, results,
+  tool: REPORT, artifacts, browser: browserPath, headless: !headed, extensionId: extId, passed, failed: failures, blocked: offline, results,
 }, null, 2));
 log(`${passed} passed, ${failures} failed. Screenshots and report.json: ${outDir}`);
 clearTimeout(watchdog);
