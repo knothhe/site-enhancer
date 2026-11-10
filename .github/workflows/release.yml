@@ -57,8 +57,9 @@ jobs:
             .output/*-chrome.zip
             .output/*-firefox.zip
           if-no-files-found: error
+          include-hidden-files: true # .output is a dot directory
       - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
