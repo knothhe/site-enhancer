@@ -188,3 +188,32 @@ test('URL-only copy reports a missing permalink instead of copying empty text', 
   assert.deepEqual(copied, []);
   assert.match(document.body.textContent!, /Post link unavailable/);
 });
+
+test('adds actions when X opens the menu from a cancelled Enter or Space keydown', async () => {
+  cleanup = installXCopyMenu();
+  for (const key of ['Enter', ' ']) {
+    const caret = tweet('Keyboard', key === 'Enter' ? '7' : '8').querySelector<HTMLElement>('[data-testid="caret"]')!;
+    caret.addEventListener('keydown', event => event.preventDefault(), { once: true });
+    caret.dispatchEvent(new win.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }) as any);
+    const portal = menu();
+    await flush();
+    const items = portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem');
+    assert.equal(items.length, 3);
+    items[2].click();
+    await flush();
+    portal.remove();
+    await flush();
+  }
+  assert.deepEqual(copied, ['https://x.com/author/status/7', 'https://x.com/author/status/8']);
+});
+
+test('a keyboard click after keydown keeps the menu session', async () => {
+  cleanup = installXCopyMenu();
+  const caret = tweet().querySelector<HTMLElement>('[data-testid="caret"]')!;
+  caret.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) as any);
+  const portal = menu();
+  await flush();
+  caret.dispatchEvent(new win.MouseEvent('click', { bubbles: true, detail: 0 }) as any);
+  await flush();
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
+});

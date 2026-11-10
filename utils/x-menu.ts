@@ -184,6 +184,8 @@ export function installXCopyMenu(): () => void {
   function onClick(event: MouseEvent) {
     if (!(event.target instanceof Element)) return;
     const trigger = event.target.closest<HTMLElement>(CARET);
+    // A keyboard activation already started this session from keydown.
+    if (trigger && event.detail === 0 && session?.trigger === trigger) return;
     if (trigger) { start(trigger); return; }
     if (!session?.menu?.contains(event.target)) reset();
   }
@@ -191,8 +193,9 @@ export function installXCopyMenu(): () => void {
   function onKeyDown(event: KeyboardEvent) {
     if (!(event.target instanceof Element)) return;
     const trigger = event.target.closest<HTMLElement>(CARET);
-    // Enter/Space produce a click; ArrowDown can open a native menu directly.
-    if (trigger && event.key === 'ArrowDown') { start(trigger); return; }
+    // X opens its menu on keydown and cancels the default, so Enter/Space
+    // do not reliably produce a click on the caret.
+    if (trigger && ['ArrowDown', 'Enter', ' '].includes(event.key)) { start(trigger); return; }
     if (event.key === 'Escape') { reset(); return; }
     const menu = session?.menu;
     if (!menu?.contains(event.target)) return;
