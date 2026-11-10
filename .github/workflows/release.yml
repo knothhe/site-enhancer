@@ -69,7 +69,7 @@ jobs:
             gh release upload "$TAG" "${zips[@]}" --clobber
           else
             flags=()
-            case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+            case "${TAG%%+*}" in *-*) flags+=(--prerelease) ;; esac # SemVer prerelease, ignoring +build
             gh release create "$TAG" "${zips[@]}" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}"
           fi
           gh release view "$TAG" --json url,assets --jq '.url, .assets[].name'
