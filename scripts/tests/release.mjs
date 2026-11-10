@@ -240,6 +240,11 @@ test('CI verify matches tag, package.json and both built manifests', t => {
   assert.throws(() => verify('v0.1.5'), /firefox-mv2.*does not match/);
   build('0.2.0-rc.1', { chrome: { version: '0.2.0', version_name: '0.2.0-rc.1' }, firefox: { version: '0.2.0' } });
   assert.deepEqual(verify('v0.2.0-rc.1'), ['.output/fixture-0.2.0-rc.1-chrome.zip', '.output/fixture-0.2.0-firefox.zip']);
+  build('0.2.0+build.1', { chrome: { version: '0.2.0', version_name: '0.2.0+build.1' }, firefox: { version: '0.2.0' } });
+  assert.equal(verify('v0.2.0+build.1').length, 2);
+  build('0.2.0-rc.1', { chrome: { version: '0.2.0', version_name: '0.2.0-rc.2' }, firefox: { version: '0.2.0' } });
+  assert.throws(() => verify('v0.2.0-rc.1'), /chrome-mv3.*does not match/);
+  build('0.2.0-rc.1', { chrome: { version: '0.2.0', version_name: '0.2.0-rc.1' }, firefox: { version: '0.2.0' } });
   fs.rmSync('.output/fixture-0.2.0-firefox.zip');
   assert.throws(() => verify('v0.2.0-rc.1'), /Missing .*firefox.zip/);
 });

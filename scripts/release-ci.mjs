@@ -25,16 +25,15 @@ export function verify(tag, output = '.output') {
   const pkg = readJSON('package.json');
   parse(pkg.version);
   if (tag && tagVersion(tag) !== pkg.version) fail(`Tag ${tag} does not match package.json version ${pkg.version}.`);
-  const { pre } = parse(pkg.version);
   const core = pkg.version.split(/[-+]/)[0];
   const zips = [];
   for (const [browser, dir] of [['chrome', 'chrome-mv3'], ['firefox', 'firefox-mv2']]) {
     const manifestFile = path.join(output, dir, 'manifest.json');
     if (!fs.existsSync(manifestFile)) fail(`Missing ${manifestFile}; build ${browser} first.`);
     const manifest = readJSON(manifestFile);
-    // WXT writes the numeric core to "version" and keeps a prerelease in "version_name" (Chrome only).
-    const ok = pre === undefined ? manifest.version === pkg.version
-      : manifest.version === core && [undefined, pkg.version].includes(manifest.version_name);
+    // WXT writes the numeric core to "version"; a prerelease/build suffix survives only in "version_name" (Chrome).
+    const ok = manifest.version === pkg.version
+      || (manifest.version === core && [undefined, pkg.version].includes(manifest.version_name));
     if (!ok) fail(`${manifestFile} version ${manifest.version} does not match package.json ${pkg.version}.`);
     // WXT names ZIPs after the manifest version, so a Firefox prerelease ZIP carries only the core.
     const names = [...new Set([pkg.version, manifest.version_name, manifest.version].filter(Boolean))]
