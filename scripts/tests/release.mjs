@@ -16,8 +16,13 @@ function fixture(t, { github = false, checks } = {}) {
   const root = path.join(folder, 'work');
   const remote = path.join(folder, 'remote.git');
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  // Drop inherited make state: a parent `make release RELEASE_FLAGS=--apply` exports its
+  // command-line variables and MAKEFLAGS, which would turn fixture previews into applies.
+  const inherited = { ...process.env };
+  for (const name of ['MAKEFLAGS', 'MFLAGS', 'MAKELEVEL', 'MAKEOVERRIDES', 'RELEASE_COMMAND',
+    'VERSION_BUMP', 'RELEASE_FLAGS', 'INSTALL_COMMAND', 'INSTALL_FLAGS']) delete inherited[name];
   const env = {
-    ...process.env,
+    ...inherited,
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0',
     GIT_AUTHOR_NAME: 'Release Test', GIT_AUTHOR_EMAIL: 'release@example.invalid',
     GIT_COMMITTER_NAME: 'Release Test', GIT_COMMITTER_EMAIL: 'release@example.invalid',
