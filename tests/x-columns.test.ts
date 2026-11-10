@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { columnGeometry, parseColumnWidths, detailUrl, installXColumns, COLUMNS_WIDTH_KEY } from '../utils/x-columns.ts';
+import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY } from '../utils/x-columns.ts';
 
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
 
@@ -56,6 +56,13 @@ test('post body and timestamp clicks open one frame without navigating or replac
   click('time');
   assert.equal(document.querySelectorAll('iframe').length, 1);
   assert.equal(document.querySelectorAll('#site-enhancer-columns').length, 1);
+});
+test('outer post body resolves its own permalink even when a quoted timestamp comes first', () => {
+  start();
+  document.querySelector('article')!.innerHTML = `<div data-testid="tweetText">Outer body</div><div role="link" tabindex="0"><a href="/bob/status/999"><time>quoted</time></a><div>Quoted body</div></div><a href="/alice/status/123"><time>outer</time></a>`;
+  assert.equal(postPermalink(document.querySelector('article')!), 'https://x.com/alice/status/123');
+  assert.ok(click('[data-testid="tweetText"]').defaultPrevented);
+  assert.equal(document.querySelector('iframe')?.src, 'https://x.com/alice/status/123');
 });
 test('interactive controls, profiles, media and modified clicks keep native behavior', () => {
   start();
