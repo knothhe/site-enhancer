@@ -1,4 +1,5 @@
 import { copyToClipboard } from '../utils/clipboard';
+import { getPostText, getPostUrl, linuxDoLabels } from '../utils/linux-do';
 
 export default defineContentScript({
   matches: ['*://linux.do/*'],
@@ -74,6 +75,8 @@ export default defineContentScript({
       </svg>
     `;
 
+    const labels = linuxDoLabels();
+
     function addCopyButtons(post: Element) {
       // Check if buttons already exist
       if (post.querySelector('.linux-do-copy-btn')) {
@@ -90,7 +93,7 @@ export default defineContentScript({
       const copyTextOnlyBtn = document.createElement('button');
       copyTextOnlyBtn.className = 'widget-button btn-flat linux-do-copy-btn btn';
       copyTextOnlyBtn.innerHTML = copyTextOnlyIcon;
-      copyTextOnlyBtn.title = 'Copy post text only';
+      copyTextOnlyBtn.title = labels.text;
       copyTextOnlyBtn.type = 'button';
       copyTextOnlyBtn.setAttribute('aria-label', copyTextOnlyBtn.title);
 
@@ -98,7 +101,7 @@ export default defineContentScript({
       const copyWithLinkBtn = document.createElement('button');
       copyWithLinkBtn.className = 'widget-button btn-flat linux-do-copy-btn btn';
       copyWithLinkBtn.innerHTML = copyWithLinkIcon;
-      copyWithLinkBtn.title = 'Copy post with link';
+      copyWithLinkBtn.title = labels.link;
       copyWithLinkBtn.type = 'button';
       copyWithLinkBtn.setAttribute('aria-label', copyWithLinkBtn.title);
 
@@ -111,9 +114,9 @@ export default defineContentScript({
 
         if (postText) {
           const success = await copyToClipboard(postText);
-          showToast(success ? 'Copied text!' : 'Failed to copy');
+          showToast(success ? labels.copiedText : labels.failed);
         } else {
-          showToast('No post text to copy');
+          showToast(labels.empty);
         }
       });
 
@@ -124,83 +127,18 @@ export default defineContentScript({
         const postText = getPostText(post);
         const postUrl = getPostUrl(post);
 
-        if (postText && postUrl) {
+        if (postText) {
           const copyText = `${postText}\n${postUrl}\n#Linuxdo`;
           const success = await copyToClipboard(copyText);
-          showToast(success ? 'Copied with link!' : 'Failed to copy');
+          showToast(success ? labels.copiedLink : labels.failed);
         } else {
-          showToast('Failed to copy');
+          showToast(labels.empty);
         }
       });
 
       // Insert at the end of controls (so they appear on the right)
       controls.appendChild(copyTextOnlyBtn);
       controls.appendChild(copyWithLinkBtn);
-    }
-
-    function getPostText(post: Element): string | null {
-      // Try multiple selectors to find post content
-      const contentSelectors = [
-        '.cooked',
-        '.post-content',
-        '.topic-body',
-        '[itemprop="articleBody"]'
-      ];
-
-      for (const selector of contentSelectors) {
-        const content = post.querySelector(selector);
-        if (content) {
-          const text = (content instanceof HTMLElement ? content.innerText : content.textContent)?.trim() || '';
-          if (text.length > 0) {
-            return text;
-          }
-        }
-      }
-
-      return null;
-    }
-
-    function getPostUrl(post: Element): string | null {
-      let url: string | null = null;
-
-      // Try to find the post link
-      const postLink = post.querySelector('a[data-post-number]');
-      if (postLink) {
-        const href = postLink.getAttribute('href');
-        if (href) {
-          url = href.startsWith('/') ? `${window.location.origin}${href}` : href;
-        }
-      }
-
-      // Alternative: try to find any link with post number
-      if (!url) {
-        const links = post.querySelectorAll('a');
-        for (const link of links) {
-          const href = link.getAttribute('href');
-          if (href && (href.includes('/p/') || href.includes('/t/'))) {
-            url = href.startsWith('/') ? `${window.location.origin}${href}` : href;
-            break;
-          }
-        }
-      }
-
-      // Fallback: use current page URL
-      if (!url) {
-        url = window.location.href;
-      }
-
-      // Remove ?u parameter from URL
-      if (url) {
-        try {
-          const urlObj = new URL(url);
-          urlObj.searchParams.delete('u');
-          url = urlObj.toString();
-        } catch {
-          // If URL parsing fails, return as is
-        }
-      }
-
-      return url;
     }
 
     // Function to process existing posts
