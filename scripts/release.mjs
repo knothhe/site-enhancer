@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Single-package SemVer releases. Node.js 18+, Git; gh for GitHub releases/initial checks.
+// Single-package SemVer releases: bump, commit, annotated tag and atomic push. Node.js 18+, Git;
+// gh only for the initial-release check. Tag pushes trigger .github/workflows/release.yml,
+// which builds the browser ZIPs and publishes the GitHub Release.
 // .mjs works in both CommonJS and ESM projects without extra dependencies.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -183,11 +185,7 @@ function argumentsFor(argv) {
     if (arg === '--apply') args.apply = true;
     else if (arg === '--no-push') args.noPush = true;
     else if (arg === '--resume') args.resume = true;
-    else if (['--github-release', '--no-github-release'].includes(arg)) {
-      const value = arg === '--github-release';
-      requireThat(args.github === undefined || args.github === value, 'GitHub Release flags are mutually exclusive.');
-      args.github = value;
-    } else {
+    else {
       requireThat(!arg.startsWith('-') && args.version === undefined, `Unexpected argument: ${arg}`);
       args.version = arg;
     }
@@ -199,21 +197,18 @@ function argumentsFor(argv) {
 function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--help') || argv.includes('-h')) {
-    console.log('Usage: node scripts/release.mjs <initial|major|minor|patch|version> [--apply] [--no-push] [--github-release|--no-github-release] [--resume]\nDefaults to preview. initial publishes the current version without a version commit. --resume requires the exact existing release version.');
+    console.log('Usage: node scripts/release.mjs <initial|major|minor|patch|version> [--apply] [--no-push] [--resume]\nDefaults to preview. Pushing the tag starts the GitHub Actions release. initial publishes the current version without a version commit. --resume requires the exact existing release version.');
     return;
   }
   const args = argumentsFor(argv);
   process.chdir(git('rev-parse', '--show-toplevel'));
   const config = fs.existsSync('.release.json') ? readJSON('.release.json') : {};
   requireThat(object(config), '.release.json must contain an object.');
-  requireThat(Object.keys(config).every(k => ['version_file', 'branch', 'remote', 'tag_prefix', 'checks', 'check_phase', 'github_release'].includes(k)), 'Unknown .release.json field.');
+  requireThat(Object.keys(config).every(k => ['version_file', 'branch', 'remote', 'tag_prefix', 'checks', 'check_phase'].includes(k)), 'Unknown .release.json field.');
   const { branch = 'main', remote = 'origin', tag_prefix: prefix = 'v', checks = [], check_phase: checkPhase = 'before-bump' } = config;
   for (const [name, value] of [['branch', branch], ['remote', remote], ['tag_prefix', prefix]]) {
     requireThat(typeof value === 'string' && (value || name === 'tag_prefix') && !value.startsWith('-'), `Invalid ${name}.`);
   }
-  const github = args.github ?? config.github_release ?? false;
-  requireThat(typeof github === 'boolean', 'github_release must be boolean.');
-  requireThat(!(github && args.noPush), 'GitHub Release requires pushing. Use --no-github-release with --no-push.');
   requireThat(Array.isArray(checks) && checks.every(c => Array.isArray(c) && c.length && c.every(s => typeof s === 'string' && s)), 'checks must be arrays of command arguments.');
   requireThat(['before-bump', 'after-bump'].includes(checkPhase), 'check_phase must be before-bump or after-bump.');
   clean();
@@ -249,14 +244,13 @@ function main() {
     const remoteTag = refs.get('refs/tags/' + tag);
     if (remoteTag) requireThat(args.resume && remoteTag === git('rev-parse', 'refs/tags/' + tag), 'Remote tag already exists with a different release; never overwrite it.');
   }
-  const repo = github ? githubRepo(url) : null;
-  const initialRepo = initial && !args.noPush ? githubRepo(url, false) : null;
-  if (initialRepo && !args.resume) requireUnpublishedRelease(initialRepo, tag);
+  const repo = args.noPush ? null : githubRepo(url, false);
+  if (repo && initial && !args.resume) requireUnpublishedRelease(repo, tag);
   const phase = initial ? 'current-version' : checkPhase;
-  const notes = github ? releaseNotes(repo, prefix, target, args.resume && !initial ? `${head}^` : head, tag) : null;
-  console.log(JSON.stringify({ mode: args.apply ? 'execute' : 'preview', release_type: initial ? 'initial' : 'upgrade', current, target, branch, remote, tag, files: initial ? [] : [...files.keys()], create_version_commit: !initial && !args.resume, checks: args.resume ? [] : checks, check_phase: args.resume ? null : phase, push: !args.noPush, github_release: github, github_repo: repo, release_notes: notes, resume: args.resume }, null, 2));
+  // Preview of the notes GitHub Actions generates from the pushed tag.
+  const notes = repo ? releaseNotes(repo, prefix, target, args.resume && !initial ? `${head}^` : head, tag) : null;
+  console.log(JSON.stringify({ mode: args.apply ? 'execute' : 'preview', release_type: initial ? 'initial' : 'upgrade', current, target, branch, remote, tag, files: initial ? [] : [...files.keys()], create_version_commit: !initial && !args.resume, checks: args.resume ? [] : checks, check_phase: args.resume ? null : phase, push: !args.noPush, github_repo: repo, release_notes: notes, resume: args.resume }, null, 2));
   if (!args.apply) return;
-  if (github) run(['gh', 'auth', 'status', '--hostname', 'github.com']);
   if (!args.resume) {
     if (!initial && checkPhase === 'after-bump') writeVersions(files, target);
     runChecks(checks, files, phase);
@@ -274,21 +268,13 @@ function main() {
     git('tag', '-a', tag, '-m', initial ? initialTagMessage(tag) : `Release ${tag}`);
   }
   if (!args.noPush) git('push', '--atomic', remote, `HEAD:refs/heads/${branch}`, `refs/tags/${tag}:refs/tags/${tag}`);
-  if (github) {
-    const existing = run(['gh', 'release', 'view', tag, '--repo', repo, '--json', 'url'], false);
-    if (existing.status === 0) console.log(existing.stdout.trim());
-    else {
-      const command = ['gh', 'release', 'create', tag, '--repo', repo, '--verify-tag', '--notes-file', '-', '--title', tag];
-      if (parse(target).pre !== undefined) command.push('--prerelease');
-      console.log(run(command, true, false, notes).stdout.trim());
-    }
-  }
-  console.log(`Release complete: ${tag}${args.noPush ? ' (local only)' : ''}`);
+  console.log(args.noPush ? `Tagged ${tag} locally; push it to start the GitHub Actions release.`
+    : `Pushed ${tag}. GitHub Actions now builds the ZIPs and publishes the release${repo ? `: https://github.com/${repo}/actions/workflows/release.yml` : '.'}`);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try { main(); }
   catch (error) {
-    console.error(`ERROR: ${error.message}\nStopped without automatic rollback or force-push. Inspect git status/log/tags. If the release tag already exists at HEAD, retry with the exact version --resume --apply.`);
+    console.error(`ERROR: ${error.message}\nStopped without automatic rollback or force-push. Inspect git status/log/tags. If the release tag already exists at HEAD but was not pushed, retry with the exact version --resume --apply.`);
     process.exitCode = 1;
   }
 }

@@ -8,6 +8,5 @@
     ["pnpm", "compile"],
     ["pnpm", "build"]
   ],
-  "check_phase": "after-bump",
-  "github_release": true
+  "check_phase": "after-bump"
 }
