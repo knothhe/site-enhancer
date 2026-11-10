@@ -155,7 +155,8 @@ function build(browser, root, options) {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
   requireThat(typeof pkg.scripts?.[script] === "string", `Missing build script: ${script}. Configure build_scripts for ${browser}.`)
   const command = options.packageManager + (process.platform === "win32" ? ".cmd" : "")
-  const result = spawnSync(command, ["run", script], { cwd: root, stdio: "inherit" })
+  // Windows .cmd shims cannot be spawned without a shell (Node EINVAL since CVE-2024-27980).
+  const result = spawnSync(command, ["run", script], { cwd: root, stdio: "inherit", shell: process.platform === "win32" })
   if (result.error)
     throw result.error
   requireThat(result.status === 0, `Build failed for ${browser}; installation was not changed.`)

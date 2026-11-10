@@ -19,6 +19,13 @@ export function columnGeometry(width: number, preference: ColumnWidths) {
   const feed = Math.max(360, Math.min(available - 360, Math.round(available * preference.share)));
   return { nav, feed, detail: available - feed };
 }
+/** The post's own timestamp link, skipping timestamps inside quoted-post cards. */
+export function postPermalink(article: Element): string | undefined {
+  return Array.from(article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]:has(time)')).find(link => {
+    const card = link.parentElement?.closest('[role="link"]');
+    return !card || !article.contains(card);
+  })?.href;
+}
 export function detailUrl(href: string, origin: string): string | undefined {
   try {
     const url = new URL(href, origin);
@@ -165,7 +172,7 @@ export function installXColumns(options: {
   function openDetail(url: string) {
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(article =>
-      detailUrl(article.querySelector<HTMLAnchorElement>('a[href*="/status/"]:has(time)')?.href ?? '', location.origin) === url);
+      detailUrl(postPermalink(article) ?? '', location.origin) === url);
     selectedArticle?.setAttribute('data-site-enhancer-selected', '');
     clearInterval(timer);
     frame?.remove();
@@ -423,7 +430,7 @@ export function installXColumns(options: {
     // Never fall back to the outer post for an anchorless card. If X changes
     // its component shape, leave the native card interaction intact.
     const href = link?.href ?? (card ? resolveQuoteUrl(card, location.origin)
-      : article.querySelector<HTMLAnchorElement>('a[href*="/status/"]:has(time)')?.href);
+      : postPermalink(article));
     const url = href && detailUrl(href, location.origin);
     if (!url || link?.target === '_blank' || link?.hasAttribute('download')) return;
     event.preventDefault();
