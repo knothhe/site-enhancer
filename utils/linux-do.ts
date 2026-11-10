@@ -27,14 +27,15 @@ export function getPostText(post: Element): string | null {
     } finally {
       hidden.forEach(restore => restore());
     }
-    if (text) return text;
+    // The first content container is the body; broader ones add author and controls.
+    return text || null;
   }
   return null;
 }
 
 export function getPostUrl(post: Element, location: Location = window.location): string {
   // The post date links to this post; links inside the body may point elsewhere.
-  const href = post.querySelector('a.post-date[href], a[data-post-number][href]')?.getAttribute('href')
+  const href = (post.querySelector('a.post-date[href]') ?? post.querySelector('a[data-post-number][href]'))?.getAttribute('href')
     ?? Array.from(post.querySelectorAll('a[href]'), link => link.getAttribute('href')!)
       .find(value => value.includes('/p/') || value.includes('/t/'));
   let url = location.href;

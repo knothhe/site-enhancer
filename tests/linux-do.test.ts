@@ -29,7 +29,8 @@ test('skips image lightbox captions and restores their style', () => {
 });
 
 test('uses the post date link instead of topic links in the body', () => {
-  const article = post(`<div class="cooked"><p><a href="/t/topic/999">other topic</a></p></div>
+  const article = post(`<a data-post-number="1" href="/t/topic/42/1">reply to</a>
+    <div class="cooked"><p><a href="/t/topic/999">other topic</a></p></div>
     <div class="post-info post-date"><a class="post-date" href="/t/topic/42/3?u=me">1m</a></div>`);
   assert.equal(getPostUrl(article, win.location as any), 'https://linux.do/t/topic/42/3');
 });
@@ -42,4 +43,11 @@ test('follows the page language and falls back to English', () => {
   assert.equal(linuxDoLabels('zh-CN').copiedText, '已复制文字');
   assert.equal(linuxDoLabels('en').copiedText, 'Copied text!');
   assert.equal(linuxDoLabels('fr').text, 'Copy post text only');
+});
+
+test('an image-only post has no text instead of copying author and controls', () => {
+  const article = post(`<div class="topic-body"><div class="names">author</div>
+    <div class="cooked"><div class="lightbox-wrapper"><div class="meta">image.png 10 KB</div></div></div>
+    <button>Reply</button></div>`);
+  assert.equal(getPostText(article), null);
 });
