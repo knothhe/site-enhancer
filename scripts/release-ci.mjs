@@ -36,8 +36,11 @@ export function verify(tag, output = '.output') {
     const ok = pre === undefined ? manifest.version === pkg.version
       : manifest.version === core && [undefined, pkg.version].includes(manifest.version_name);
     if (!ok) fail(`${manifestFile} version ${manifest.version} does not match package.json ${pkg.version}.`);
-    const zip = path.join(output, `${pkg.name}-${pkg.version}-${browser}.zip`);
-    if (!fs.existsSync(zip)) fail(`Missing ${zip}; run the ${browser} zip first.`);
+    // WXT names ZIPs after the manifest version, so a Firefox prerelease ZIP carries only the core.
+    const names = [...new Set([pkg.version, manifest.version_name, manifest.version].filter(Boolean))]
+      .map(version => path.join(output, `${pkg.name}-${version}-${browser}.zip`));
+    const zip = names.find(name => fs.existsSync(name));
+    if (!zip) fail(`Missing ${names[0]}; run the ${browser} zip first.`);
     zips.push(zip);
   }
   return zips;
