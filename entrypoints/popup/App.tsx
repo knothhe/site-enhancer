@@ -6,6 +6,8 @@ import { getTextDownload, getTextFilename, readTextPage, type TextPage } from '.
 import { isXHost, X_STYLE_OPTIONS, X_STYLES, type XStyle } from '../../utils/x-style';
 import { X_THEME_NAMES, X_THEMES, xThemeLabel, type XTheme } from '../../utils/x-theme';
 import { xStyleSetting, xThemeSetting } from '../../utils/x-settings';
+import { browserLocale, type Locale } from '../../utils/i18n';
+import { MESSAGES } from './messages';
 import './App.css';
 
 type CopyMode = 'clean' | 'bare';
@@ -56,7 +58,9 @@ function swatchStyle(theme: XTheme): CSSProperties {
   } as CSSProperties;
 }
 
-function App() {
+function App({ locale = browserLocale() }: { locale?: Locale }) {
+  const t = MESSAGES[locale];
+  const styleOptions = X_STYLE_OPTIONS[locale];
   const [page, setPage] = useState<PageState>({ status: 'loading' });
   const [copy, setCopy] = useState<CopyState>({ status: 'idle' });
   const [download, setDownload] = useState<DownloadState>('idle');
@@ -139,11 +143,11 @@ function App() {
   const showActions = ready || page.status === 'loading';
   const onX = ready && isXHost(page.urls.hostname);
   const feedback = copy.status === 'copied'
-    ? `${copy.mode === 'clean' ? '干净链接' : '无参数链接'}已复制到剪贴板`
-    : copy.status === 'failed' ? '复制失败，请重试。' : copy.status === 'copying' ? '正在复制…' : '';
-  const downloadFeedback = download === 'failed' ? '下载失败，请重试或重新打开面板。'
-    : download === 'started' ? '已开始下载，请在浏览器下载列表中查看。'
-      : download === 'preparing' ? '正在准备下载…' : '';
+    ? t.copiedNotice(t[copy.mode].name)
+    : copy.status === 'failed' ? t.copyFailed : copy.status === 'copying' ? t.copyingNotice : '';
+  const downloadFeedback = download === 'failed' ? t.downloadFailed
+    : download === 'started' ? t.downloadStarted
+      : download === 'preparing' ? t.downloadPreparing : '';
   const settingsFailed = xStyleFailed || xThemeFailed;
   const notice = copy.status === 'failed' ? feedback : download === 'failed' ? downloadFeedback : '';
 
@@ -151,7 +155,7 @@ function App() {
     <main className="se">
       {showActions ? <>
         <section className="se-block" aria-labelledby="copy-title">
-          <h2 className="se-label" id="copy-title">复制链接</h2>
+          <h2 className="se-label" id="copy-title">{t.copyTitle}</h2>
           <div className="se-copy">
             {(['clean', 'bare'] as const).map(mode => {
               const primary = mode === 'clean';
@@ -166,14 +170,14 @@ function App() {
                   data-kind={mode}
                   data-state={copied ? 'done' : busy ? 'busy' : failed ? 'error' : undefined}
                   disabled={!ready || copy.status === 'copying'}
-                  aria-label={primary ? '复制干净链接' : '复制无参数链接'}
+                  aria-label={t[mode].action}
                   aria-busy={busy}
-                  title={primary ? '清除已知追踪项，保留其他参数与锚点' : '移除全部查询参数，保留锚点；搜索、筛选条件可能丢失'}
+                  title={t[mode].title}
                   onClick={() => void handleCopy(mode)}
                 >
                   <span className="se-tile-icon" aria-hidden="true">{copied ? <IconCheck /> : primary ? <IconSpark /> : <IconLink />}</span>
-                  <span className="se-tile-name">{primary ? '干净链接' : '无参数链接'}</span>
-                  <span className="se-tile-hint">{busy ? '复制中…' : copied ? '已复制' : failed ? '复制失败' : primary ? '去除追踪项' : '去除全部参数'}</span>
+                  <span className="se-tile-name">{t[mode].name}</span>
+                  <span className="se-tile-hint">{busy ? t.copying : copied ? t.copied : failed ? t.copyFailedShort : t[mode].hint}</span>
                 </button>
               );
             })}
@@ -182,22 +186,22 @@ function App() {
         </section>
 
         {ready && page.textPage && <section className="se-block" aria-labelledby="download-title">
-          <h2 className="se-label" id="download-title">{isJson ? 'JSON 文件' : '纯文本文件'}</h2>
+          <h2 className="se-label" id="download-title">{isJson ? t.jsonFile : t.textFile}</h2>
           <button
             type="button"
             className="se-file"
             data-state={download === 'started' ? 'done' : download === 'preparing' ? 'busy' : download === 'failed' ? 'error' : undefined}
             disabled={download === 'preparing'}
-            aria-label={isJson ? '下载 JSON' : '下载文本'}
+            aria-label={isJson ? t.downloadJson : t.downloadText}
             aria-describedby="download-description"
             aria-busy={download === 'preparing'}
-            title={`将当前${isJson ? ' JSON ' : '纯文本'}内容保存到浏览器的下载目录`}
+            title={isJson ? t.downloadJsonTitle : t.downloadTextTitle}
             onClick={() => void handleDownload()}
           >
             <span className="se-file-badge" aria-hidden="true">{isJson ? '{ }' : 'TXT'}</span>
             <span id="download-description" className="se-file-name">{downloadFilename}</span>
             <span className="se-file-action">
-              {download === 'preparing' ? '准备中…' : download === 'started' ? '已开始' : download === 'failed' ? '重试' : '下载'}
+              {download === 'preparing' ? t.preparing : download === 'started' ? t.started : download === 'failed' ? t.retry : t.download}
               <IconArrowDown />
             </span>
           </button>
@@ -205,43 +209,43 @@ function App() {
       </> : (
         <div className="se-empty">
           <span className="se-empty-art" aria-hidden="true"><IconSlash /></span>
-          <h1>{page.status === 'failed' ? '暂时无法读取页面' : '当前页面无法复制'}</h1>
-          <p>{page.status === 'failed' ? '读取标签页信息时出错。' : '浏览器内部页面、本地文件等地址不支持复制。'}</p>
-          <button className="se-retry" type="button" onClick={() => void loadPage()}>重新读取</button>
+          <h1>{page.status === 'failed' ? t.readFailedTitle : t.unavailableTitle}</h1>
+          <p>{page.status === 'failed' ? t.readFailed : t.unavailable}</p>
+          <button className="se-retry" type="button" onClick={() => void loadPage()}>{t.reload}</button>
         </div>
       )}
 
       {onX && <section className="se-block se-x" aria-labelledby="x-page-title">
-        <h2 className="se-label" id="x-page-title">X 页面</h2>
+        <h2 className="se-label" id="x-page-title">{t.xPage}</h2>
         <div className="se-field">
-          <span className="se-field-name" id="x-style-label">布局</span>
+          <span className="se-field-name" id="x-style-label">{t.layout}</span>
           <div className="se-seg" role="radiogroup" aria-labelledby="x-style-label">
             {X_STYLES.map(value => (
-              <label key={value} className={xStyle === value ? 'on' : undefined} title={X_STYLE_OPTIONS[value].description}>
+              <label key={value} className={xStyle === value ? 'on' : undefined} title={styleOptions[value].description}>
                 <input
                   type="radio"
                   name="x-style"
                   value={value}
                   checked={xStyle === value}
-                  aria-description={X_STYLE_OPTIONS[value].description}
+                  aria-description={styleOptions[value].description}
                   onChange={() => void setXStyle(value)}
                 />
-                <span>{X_STYLE_OPTIONS[value].label}</span>
+                <span>{styleOptions[value].label}</span>
               </label>
             ))}
           </div>
         </div>
         <div className="se-field se-field-stack">
-          <span className="se-field-name" id="x-theme-label">主题<em>{xThemeLabel(xTheme)}</em></span>
+          <span className="se-field-name" id="x-theme-label">{t.theme}<em>{xThemeLabel(xTheme, locale)}</em></span>
           <div className="se-dots" role="radiogroup" aria-labelledby="x-theme-label">
             {X_THEME_NAMES.map(value => (
-              <label key={value} className={xTheme === value ? 'on' : undefined} title={xThemeLabel(value)} style={swatchStyle(value)}>
+              <label key={value} className={xTheme === value ? 'on' : undefined} title={xThemeLabel(value, locale)} style={swatchStyle(value)}>
                 <input
                   type="radio"
                   name="x-theme"
                   value={value}
                   checked={xTheme === value}
-                  aria-label={xThemeLabel(value)}
+                  aria-label={xThemeLabel(value, locale)}
                   onChange={() => void setXTheme(value)}
                 />
               </label>
@@ -249,7 +253,7 @@ function App() {
           </div>
         </div>
         <p className={settingsFailed ? 'se-alert' : 'sr-only'} role="status" aria-live="polite">
-          {settingsFailed ? '设置保存失败，请重试。' : ''}
+          {settingsFailed ? t.settingsFailed : ''}
         </p>
       </section>}
 

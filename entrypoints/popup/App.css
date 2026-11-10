@@ -225,6 +225,8 @@
   transition: background-color .15s ease, color .15s ease;
 }
 
+.se-seg label:lang(en) { padding-inline: 7px; } /* English names are wider than the Chinese ones. */
+
 .se-seg label:hover { color: var(--ink); }
 .se-seg label.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 

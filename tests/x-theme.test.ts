@@ -53,7 +53,9 @@ test('every theme defines all palette tokens for light and dark', () => {
   }
   assert.equal(X_THEME_NAMES[0], 'original');
   assert.ok(isXTheme('forest') && !isXTheme('neon'));
-  assert.equal(xThemeLabel('original'), '原版');
+  assert.equal(xThemeLabel('original', 'zh'), '原版');
+  assert.equal(xThemeLabel('original', 'en'), 'Original');
+  assert.equal(xThemeLabel('dusk', 'en'), 'Dusk');
 });
 
 test('applies themes independently of layout and restores the original page', async () => {
