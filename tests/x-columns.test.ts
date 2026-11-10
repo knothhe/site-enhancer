@@ -13,6 +13,7 @@ beforeEach(() => {
     Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? win : name === 'getComputedStyle' ? win.getComputedStyle.bind(win) : (win as any)[name] });
   }
   document.body.innerHTML = `<main role="main"><div data-testid="primaryColumn"><article data-testid="tweet" tabindex="0"><a href="/alice/status/123"><time>now</time></a><div data-testid="tweetText">Post body</div><a href="/alice">Profile</a><a href="/alice/status/123/photo/1">Photo</a><button>Like</button><a href="https://example.com">External</a></article></div></main>`;
+  document.documentElement.lang = 'zh-CN';
 });
 afterEach(async () => { columns?.remove(); columns = undefined; await win.happyDOM.close(); });
 function start() { columns = installXColumns(); columns.setEnabled(true); return columns; }
@@ -214,4 +215,15 @@ test('quotes inside the detail document replace details instead of reopening the
   assert.equal(document.querySelector('iframe')?.src, 'https://x.com/quoted/status/456');
   assert.notEqual(document.querySelector('iframe'), frame);
   assert.equal(location.pathname, '/home');
+});
+
+test('follows the X page language and uses English outside Chinese', () => {
+  document.documentElement.lang = 'en';
+  start();
+  const panel = document.querySelector('#site-enhancer-columns')!;
+  assert.match(panel.textContent!, /Select a post/);
+  assert.doesNotMatch(panel.textContent!, /[\u3400-\u9fff]/);
+  assert.equal(panel.getAttribute('aria-label'), 'Post details');
+  const labels = Array.from(document.querySelectorAll('#site-enhancer-columns :is(button, a)'), element => element.getAttribute('aria-label') ?? element.textContent);
+  assert.ok(labels.includes('Close') && labels.includes('Back') && labels.includes('New tab'), labels.join(','));
 });

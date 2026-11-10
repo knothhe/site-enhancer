@@ -5,6 +5,8 @@
  * plus some inline colors. Class names differ per X display mode and appear lazily, so matching
  * rules are generated from the live stylesheets and remapped to --se-x-* variables.
  */
+import type { Locale } from './i18n';
+
 export type XTone = 'dark' | 'dim' | 'light';
 type Token = 'bg' | 'raised' | 'input' | 'border' | 'text' | 'muted' | 'veil' | 'accent';
 type Palette = Record<Token, string>;
@@ -20,41 +22,34 @@ const palette = (bg: string, raised: string, input: string, border: string, text
 /** Each theme has a light and a dark palette; X's Dim and Lights out modes use the dark one. */
 export const X_THEMES = {
   graphite: {
-    label: '石墨',
     light: palette('#f5f6f8', '#eceef1', '#e8ebef', '#e0e3e8', '#1c2024', '#69717a', 'rgba(245, 246, 248, .86)', '#2f6fdb'),
     dark: palette('#16181c', '#1e2126', '#23272d', '#2b3036', '#e4e6e9', '#8a929b', 'rgba(22, 24, 28, .84)', '#6ea8fe'),
   },
   paper: {
-    label: '纸墨',
     light: palette('#f4efe4', '#ece5d6', '#e8e0cf', '#e0d6c3', '#2d2823', '#7d7262', 'rgba(244, 239, 228, .88)', '#a3532a'),
     dark: palette('#1c1a17', '#25221e', '#2b2823', '#36322b', '#e9e3d7', '#a09581', 'rgba(28, 26, 23, .86)', '#d9915f'),
   },
   forest: {
-    label: '森林',
     light: palette('#f1f5f0', '#e7eee5', '#e2eadf', '#d6e1d3', '#1f2a22', '#5f7064', 'rgba(241, 245, 240, .88)', '#2e7d4f'),
     dark: palette('#121a15', '#19231c', '#1e2a22', '#27352b', '#dfe8e1', '#8aa091', 'rgba(18, 26, 21, .86)', '#5fbf86'),
   },
   ocean: {
-    label: '海洋',
     light: palette('#f0f6fa', '#e4eef5', '#dde9f2', '#d2e1ec', '#142433', '#587184', 'rgba(240, 246, 250, .88)', '#0b7bbf'),
     dark: palette('#0d1821', '#13212c', '#182936', '#22394a', '#dce9f2', '#86a0b3', 'rgba(13, 24, 33, .86)', '#4fb3ee'),
   },
   mint: {
-    label: '薄荷',
     light: palette('#eff7f6', '#e2f0ee', '#dcebe9', '#cfe3e0', '#15302d', '#557471', 'rgba(239, 247, 246, .88)', '#0f8f84'),
     dark: palette('#0f1c1b', '#152523', '#1a2c2a', '#233a37', '#d9ecea', '#82a5a1', 'rgba(15, 28, 27, .86)', '#3fc7b8'),
   },
   dusk: {
-    label: '暮紫',
     light: palette('#f6f3fa', '#ede7f5', '#e8e1f2', '#ddd4ea', '#241d30', '#6d6280', 'rgba(246, 243, 250, .88)', '#7048c8'),
     dark: palette('#17141f', '#1f1b29', '#252031', '#322b40', '#e7e1f0', '#9b90ad', 'rgba(23, 20, 31, .86)', '#a88bf0'),
   },
   rose: {
-    label: '玫瑰',
     light: palette('#fbf3f4', '#f4e7e9', '#f0e1e4', '#e8d4d8', '#2e1c20', '#80636a', 'rgba(251, 243, 244, .88)', '#c2416b'),
     dark: palette('#1d1416', '#261b1e', '#2c2023', '#3a2a2e', '#f0e2e5', '#ad9298', 'rgba(29, 20, 22, .86)', '#f07a9c'),
   },
-} satisfies Record<string, { label: string; light: Palette; dark: Palette }>;
+} satisfies Record<string, { light: Palette; dark: Palette }>;
 
 export type XThemeName = keyof typeof X_THEMES;
 export type XTheme = 'original' | XThemeName;
@@ -64,8 +59,13 @@ export function isXTheme(value: unknown): value is XTheme {
   return typeof value === 'string' && (X_THEME_NAMES as string[]).includes(value);
 }
 
-export function xThemeLabel(theme: XTheme): string {
-  return theme === 'original' ? '原版' : X_THEMES[theme].label;
+export const X_THEME_LABELS: Record<Locale, Record<XTheme, string>> = {
+  zh: { original: '原版', graphite: '石墨', paper: '纸墨', forest: '森林', ocean: '海洋', mint: '薄荷', dusk: '暮紫', rose: '玫瑰' },
+  en: { original: 'Original', graphite: 'Graphite', paper: 'Paper', forest: 'Forest', ocean: 'Ocean', mint: 'Mint', dusk: 'Dusk', rose: 'Rose' },
+};
+
+export function xThemeLabel(theme: XTheme, locale: Locale): string {
+  return X_THEME_LABELS[locale][theme];
 }
 
 /** X's own colors per display mode. */

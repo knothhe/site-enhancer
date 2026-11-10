@@ -1,5 +1,6 @@
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
+import { resolveLocale, type Locale } from './i18n.ts';
 /** Three-column layout. The timeline remains owned by X; details use a same-origin frame. */
 export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
@@ -95,11 +96,36 @@ ${SCOPE}[data-site-enhancer-resizing] iframe{pointer-events:none!important}
 ${SCOPE}[data-site-enhancer-resizing],${SCOPE}[data-site-enhancer-resizing] *{cursor:col-resize!important;user-select:none!important}
 `;
 
+const zh = {
+  saveFailed: '栏宽已调整，但无法保存', saveFailedHint: '本次页面仍会使用当前宽度。',
+  empty: '选择一条推文', emptyHint: '点击时间线中的推文，在这里查看详情和回复。',
+  loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
+  frameTitle: '推文详情和回复', panel: '推文详情', title: '推文详情',
+  failed: '详情暂时无法加载', failedHint: '请重新加载扩展和页面后重试，或在新标签页查看。', retryHint: '可以重试，或在新标签页查看。',
+  newTab: '新标签页', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复栏宽', close: '关闭',
+  resizeNav: '调整导航栏宽度', resizeDetail: '调整时间线和详情宽度', resizeHint: '拖动调整宽度；方向键微调；双击恢复默认',
+};
+
+export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
+  zh,
+  en: {
+    saveFailed: 'Column widths changed but couldn’t be saved', saveFailedHint: 'This page keeps the current widths.',
+    empty: 'Select a post', emptyHint: 'Click a post in the timeline to see it and its replies here.',
+    loading: 'Loading post…', loadingHint: 'The timeline stays where it is.',
+    frameTitle: 'Post and replies', panel: 'Post details', title: 'Post',
+    failed: 'Couldn’t load the post', failedHint: 'Reload the extension and the page, then try again, or open it in a new tab.', retryHint: 'Try again, or open it in a new tab.',
+    newTab: 'New tab', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset widths', close: 'Close',
+    resizeNav: 'Resize navigation', resizeDetail: 'Resize timeline and post', resizeHint: 'Drag to resize; arrow keys to nudge; double-click to reset',
+  },
+};
+
 export function installXColumns(options: {
   prepareDetail?: (url: string) => Promise<string>;
   releaseDetail?: () => void;
 } = {}) {
   const root = document.documentElement;
+  // Follow X's interface language, like the copy menu; the browser language is the fallback.
+  const t = COLUMNS_LABELS[resolveLocale(root.lang || navigator.language)];
   const sheet = document.createElement('style');
   sheet.id = 'site-enhancer-columns-style';
   sheet.textContent = COLUMNS_CSS;
@@ -139,7 +165,7 @@ export function installXColumns(options: {
   const active = () => enabled && viewportWidth() >= COLUMNS_MIN_WIDTH;
   function save() {
     try { localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify(widths)); }
-    catch { showStatus('栏宽已调整，但无法保存', '本次页面仍会使用当前宽度。', 'error'); }
+    catch { showStatus(t.saveFailed, t.saveFailedHint, 'error'); }
   }
   function showStatus(title: string, description: string, state: 'empty' | 'loading' | 'error' = 'empty') {
     status.replaceChildren();
@@ -166,7 +192,7 @@ export function installXColumns(options: {
     retry.hidden = true;
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    showStatus('选择一条推文', '点击时间线中的推文，在这里查看详情和回复。');
+    showStatus(t.empty, t.emptyHint);
     if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
   function openDetail(url: string) {
@@ -180,10 +206,10 @@ export function installXColumns(options: {
     openLink.href = url;
     openLink.hidden = false;
     retry.hidden = true;
-    showStatus('正在加载详情…', '时间线会保留在原处。', 'loading');
+    showStatus(t.loading, t.loadingHint, 'loading');
     const current = document.createElement('iframe');
     current.name = DETAIL_FRAME_NAME;
-    current.title = '推文详情和回复';
+    current.title = t.frameTitle;
     // Keep native popups, media and forms, but prevent a child route from replacing the timeline.
     current.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
     if (options.prepareDetail) {
@@ -194,7 +220,7 @@ export function installXColumns(options: {
         clearInterval(timer);
         current.remove();
         frame = undefined;
-        showStatus('详情暂时无法加载', '请重新加载扩展和页面后重试，或在新标签页查看。', 'error');
+        showStatus(t.failed, t.failedHint, 'error');
         retry.hidden = false;
       });
     } else current.src = url;
@@ -229,7 +255,7 @@ export function installXColumns(options: {
         clearInterval(timer);
         current.remove();
         frame = undefined;
-        showStatus('详情暂时无法加载', '可以重试，或在新标签页查看。', 'error');
+        showStatus(t.failed, t.retryHint, 'error');
         retry.hidden = false;
       }
     }, 250);
@@ -273,24 +299,24 @@ export function installXColumns(options: {
     if (panel || !document.body) return;
     panel = document.createElement('aside');
     panel.id = 'site-enhancer-columns';
-    panel.setAttribute('aria-label', '推文详情');
+    panel.setAttribute('aria-label', t.panel);
     const toolbar = document.createElement('div');
     toolbar.className = 'se-column-toolbar';
     const title = document.createElement('strong');
-    title.textContent = '推文详情';
+    title.textContent = t.title;
     openLink = document.createElement('a');
-    iconControl(openLink, '新标签页', 'external');
+    iconControl(openLink, t.newTab, 'external');
     openLink.target = '_blank';
     openLink.rel = 'noopener noreferrer';
-    retry = button('重试', () => { if (selected) openDetail(selected); });
+    retry = button(t.retry, () => { if (selected) openDetail(selected); });
     const search = document.createElement('a');
     search.href = '/explore';
-    iconControl(search, '搜索', 'search');
-    backButton = button('后退', () => history.back(), 'back');
-    forwardButton = button('前进', () => history.forward(), 'forward');
+    iconControl(search, t.search, 'search');
+    backButton = button(t.back, () => history.back(), 'back');
+    forwardButton = button(t.forward, () => history.forward(), 'forward');
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    toolbar.append(title, backButton, forwardButton, search, button('恢复栏宽', reset, 'reset'), openLink, button('关闭', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    toolbar.append(title, backButton, forwardButton, search, button(t.reset, reset, 'reset'), openLink, button(t.close, () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -309,8 +335,8 @@ export function installXColumns(options: {
       divider.tabIndex = 0;
       divider.setAttribute('role', 'separator');
       divider.setAttribute('aria-orientation', 'vertical');
-      divider.setAttribute('aria-label', kind === 0 ? '调整导航栏宽度' : '调整时间线和详情宽度');
-      divider.title = '拖动调整宽度；方向键微调；双击恢复默认';
+      divider.setAttribute('aria-label', kind === 0 ? t.resizeNav : t.resizeDetail);
+      divider.title = t.resizeHint;
       divider.addEventListener('dblclick', reset);
       divider.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
