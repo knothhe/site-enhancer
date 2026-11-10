@@ -13,7 +13,7 @@ help:
 	  'make version                         Show the current version' \
 	  'make release                         Preview a patch release' \
 	  'make release VERSION_BUMP=minor       Preview a minor release (also major or an exact version)' \
-	  'make release RELEASE_FLAGS=--apply    Check, bump, commit, tag, push and create GitHub Release' \
+	  'make release RELEASE_FLAGS=--apply    Check, bump, commit, tag and push; GitHub Actions publishes' \
 	  'make release-initial                 Preview publishing the current, unpublished version' \
 	  'make install                         Build and sync Chrome using .install-local.json' \
 	  'make install INSTALL_FLAGS=--help     Show local installer options'

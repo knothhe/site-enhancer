@@ -7,8 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const releaseScript = fileURLToPath(new URL('./release.mjs', import.meta.url));
+const releaseCiScript = fileURLToPath(new URL('./release-ci.mjs', import.meta.url));
 
-function repository(t, { workspace = 'settings', checks = [], github = false } = {}) {
+function repository(t, { workspace = 'settings', checks = [] } = {}) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'copy-enhancer-release-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const root = path.join(directory, 'repo');
@@ -57,7 +58,7 @@ function repository(t, { workspace = 'settings', checks = [], github = false } =
   write('package.json', { name: 'release-fixture', version: '1.2.3', private: true });
   write('.release.json', {
     version_file: 'package.json', branch: 'main', remote: 'origin', tag_prefix: 'v',
-    checks, check_phase: 'before-bump', github_release: github,
+    checks, check_phase: 'before-bump',
   });
   write('.gitignore', 'check-ran\n');
   write('scripts/release.mjs', fs.readFileSync(releaseScript, 'utf8'));
@@ -187,8 +188,8 @@ test('a remote without atomic push support receives neither the new commit nor t
   assert.equal(repo.git('--git-dir=' + bare, 'rev-parse', 'refs/tags/v1.2.4'), repo.git('rev-parse', 'refs/tags/v1.2.4'));
 });
 
-test('GitHub Release uses local history and passes previewed notes to gh, with idempotent resume', t => {
-  const repo = repository(t, { github: true });
+test('release notes preview matches the notes CI generates from the pushed tag, and gh is never called', t => {
+  const repo = repository(t);
   repo.write('feature.txt', 'Preview support\n');
   repo.commit('feat: add [preview] buttons', ['feature.txt']);
   const featureHash = repo.git('rev-parse', '--short', 'HEAD');
@@ -201,7 +202,6 @@ test('GitHub Release uses local history and passes previewed notes to gh, with i
   fs.mkdirSync(bin);
   const mockScript = path.join(repo.directory, 'mock-gh.mjs');
   const log = path.join(repo.directory, 'gh-calls.jsonl');
-  const marker = path.join(repo.directory, 'github-release-created');
   const mockGitScript = path.join(repo.directory, 'local-git.mjs');
   // Preserve a GitHub push URL for the release plan while directing every
   // remote operation to the fixture. Git's protocol policy also blocks HTTPS.
@@ -221,16 +221,8 @@ process.exit(result.status ?? 99);
   fs.writeFileSync(mockScript, `
 import fs from 'node:fs';
 const args = process.argv.slice(2);
-const notes = args[0] === 'release' && args[1] === 'create' ? fs.readFileSync(0, 'utf8') : null;
-fs.appendFileSync(process.env.RELEASE_TEST_GH_LOG, JSON.stringify({ args, notes }) + '\\n');
-if (args[0] === 'auth' && args[1] === 'status') process.exit(0);
-if (args[0] === 'release' && args[1] === 'view') {
-  if (!fs.existsSync(process.env.RELEASE_TEST_GH_MARKER)) process.exit(1);
-  console.log(JSON.stringify({ url: 'https://github.com/release-tests/fixture/releases/tag/v1.2.4' }));
-} else if (args[0] === 'release' && args[1] === 'create') {
-  fs.writeFileSync(process.env.RELEASE_TEST_GH_MARKER, 'created');
-  console.log('https://github.com/release-tests/fixture/releases/tag/v1.2.4');
-} else process.exit(99);
+fs.appendFileSync(process.env.RELEASE_TEST_GH_LOG, JSON.stringify({ args }) + '\\n');
+process.exit(99);
 `);
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
   fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(mockScript)} "$@"\n`, { mode: 0o755 });
@@ -238,7 +230,6 @@ if (args[0] === 'release' && args[1] === 'view') {
   Object.assign(repo.env, {
     PATH: bin + path.delimiter + process.env.PATH,
     RELEASE_TEST_GH_LOG: log,
-    RELEASE_TEST_GH_MARKER: marker,
     RELEASE_TEST_GIT_BIN: realGit,
     RELEASE_TEST_REMOTE: bare,
     RELEASE_TEST_GITHUB_URL: githubUrl,
@@ -247,7 +238,6 @@ if (args[0] === 'release' && args[1] === 'view') {
   const preview = repo.release('patch');
   successful(preview);
   const plan = JSON.parse(preview.stdout);
-  assert.equal(plan.github_release, true);
   assert.equal(plan.github_repo, 'release-tests/fixture');
   assert.match(plan.release_notes, /https:\/\/github\.com\/release-tests\/fixture\/compare\/v1\.2\.3\.\.\.v1\.2\.4/);
   assert.ok(plan.release_notes.includes(`- feat: add \\[preview\\] buttons (\`${featureHash}\`)`));
@@ -256,10 +246,9 @@ if (args[0] === 'release' && args[1] === 'view') {
   assert.equal(fs.existsSync(log), false);
   assert.deepEqual(repo.state(), before);
   successful(repo.release('patch', '--apply'));
-  const calls = () => fs.readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
-  const create = calls().find(call => call.args[1] === 'create');
-  assert.deepEqual(create.args, ['release', 'create', 'v1.2.4', '--repo', 'release-tests/fixture', '--verify-tag', '--notes-file', '-', '--title', 'v1.2.4']);
-  assert.equal(create.notes, plan.release_notes);
   successful(repo.release('1.2.4', '--resume', '--apply'));
-  assert.equal(calls().filter(call => call.args[1] === 'create').length, 1);
+  assert.equal(fs.existsSync(log), false);
+  assert.equal(repo.git('--git-dir=' + bare, 'rev-parse', 'refs/tags/v1.2.4'), repo.git('rev-parse', 'refs/tags/v1.2.4'));
+  const ciNotes = repo.execute(process.execPath, [releaseCiScript, 'notes', 'v1.2.4', 'release-tests/fixture']);
+  assert.equal(ciNotes.stdout, plan.release_notes);
 });

@@ -90,7 +90,7 @@ Run `make install` to build and sync Chrome MV3 to the configured plugin directo
 
 ## Version Management
 
-Run `make version` to show the current version, `make release` to preview the next patch, and `make release VERSION_BUMP=minor RELEASE_FLAGS=--apply` to execute an upgrade with checks, an annotated tag, an atomic push and a GitHub Release. Commit the intended changes first; releases require a clean `main` branch. See [release workflow and recovery](docs/release.md).
+`make release` previews the next patch; `make release RELEASE_FLAGS=--apply` runs the checks, bumps `package.json`, commits, tags and pushes. The pushed `v*` tag triggers GitHub Actions, which builds the Chrome and Firefox ZIPs and publishes the GitHub Release. See [release workflow and recovery](docs/release.md).
 
 ## Development
 

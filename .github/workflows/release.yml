@@ -1,0 +1,74 @@
+name: Release
+
+# A pushed v* tag builds the Chrome and Firefox ZIPs and publishes the GitHub Release.
+# workflow_dispatch and pull requests touching the release pipeline run the same build
+# as a dry run: the ZIPs are uploaded as a workflow artifact and nothing is published.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release-ci.mjs
+      - scripts/release.mjs
+      - wxt.config.ts
+      - package.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm compile
+      - run: pnpm zip
+      - run: pnpm zip:firefox
+      - name: Verify versions and collect ZIPs
+        id: zips
+        run: |
+          node scripts/release-ci.mjs verify "$TAG" > zips.txt
+          cat zips.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-enhancer-zips
+          path: |
+            .output/*-chrome.zip
+            .output/*-firefox.zip
+          if-no-files-found: error
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-ci.mjs notes "$TAG" > notes.md
+          mapfile -t zips < zips.txt
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${zips[@]}" --clobber
+          else
+            flags=()
+            case "$TAG" in *-*) flags+=(--prerelease) ;; esac
+            gh release create "$TAG" "${zips[@]}" --verify-tag --title "$TAG" --notes-file notes.md "${flags[@]}"
+          fi
+          gh release view "$TAG" --json url,assets --jq '.url, .assets[].name'
