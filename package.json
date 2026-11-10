@@ -15,6 +15,7 @@
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare",
     "test": "node --experimental-strip-types --test tests/*.test.ts scripts/release.test.mjs scripts/tests/*.mjs",
+    "test:browser": "node scripts/browser-regression/run.mjs",
     "test:install-local": "node --test scripts/tests/install-local.mjs",
     "test:release": "node --test scripts/release.test.mjs scripts/tests/release.mjs",
     "build:firefox:mv3": "wxt build -b firefox --mv3",

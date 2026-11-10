@@ -125,11 +125,26 @@ pnpm test:install-local
 # Run isolated release workflow tests
 pnpm test:release
 
+# Build Chrome MV3 and run the isolated browser regression (local, Node.js 22+)
+pnpm test:browser
+
 # Create zip package
 pnpm zip
 ```
 
 Project conventions are maintained in [AGENTS.md](AGENTS.md), with [CLAUDE.md](CLAUDE.md) referring to the same rules. Installer changes require behavior tests and a real build-and-sync check in a temporary directory outside the repository. Browser verification follows the macOS launch permissions documented there.
+
+### Browser regression
+
+`pnpm test:browser` builds `.output/chrome-mv3` and drives the built extension in a Chromium browser started with a new temporary profile and a random DevTools port. It never uses an existing browser session, the system clipboard or your extension settings:
+
+- X and linux.do pages come from offline fixtures in `scripts/browser-regression/fixtures`, served through DevTools request interception. Every other request is blocked and listed in the report.
+- The regression runs on a temporary copy of the build in which the X and linux.do content scripts get an in-memory clipboard recorder prepended (`clipboard-shim.js`); the popup page gets the same recorder. Both the Clipboard API and the `execCommand` fallback are captured.
+- Covered: X More menu opened with Enter and Space (copy items injected once before the native items, opened from keydown without a click, copied text and permalink, menu closes and focus returns), mouse-opened menus, Chinese labels; linux.do buttons on initial and streamed posts, copied text without image captions, post-date permalinks, caption styles restored, image-only posts, the fallback copy path and Chinese labels; the popup in Chinese and English (plus a non-Chinese fallback), light and dark, X layout/theme changes applied to an open X tab, clean/bare link copies, the text download row, the unavailable state, and English label overflow in the segmented control.
+- Output: screenshots and `report.json` in `.output/browser-regression` (`--out <dir>` to change). Exit code 0 when every assertion passes, 1 on any failure or timeout, 2 when no browser is found. The browser and the temporary profile are removed on exit, including Ctrl-C.
+- Options: `--skip-build` reuses the current build, `--headed` shows the window. `SE_BROWSER` selects the executable (default: the first of ego lite, Chrome for Testing or Chromium in their standard locations); `SE_BROWSER_TIMEOUT_MS` changes the 120-second limit. Branded Google Chrome may ignore `--load-extension`.
+
+Limits: fixtures imitate the structure the content scripts rely on, not live X or linux.do. Downloads, Firefox, the toolbar popup window and CI are not covered; the command has been verified with ego lite (Chromium 156, headless) on macOS.
 
 ## Tech Stack
 

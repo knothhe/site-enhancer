@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<title>linux.do fixture</title>
+<style>
+  body { margin: 0; font: 15px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; color: #222; background: #fff; }
+  .post-stream { width: 720px; margin: 0 auto; }
+  .topic-post { display: flex; gap: 12px; padding: 16px 0; border-bottom: 1px solid #e9e9e9; }
+  .topic-avatar { width: 45px; height: 45px; border-radius: 50%; background: #d9d9d9; flex: none; }
+  .topic-body { flex: 1; }
+  .names { font-weight: 600; }
+  .lightbox-wrapper { display: inline-block; position: relative; }
+  .lightbox img { display: block; background: #c8d6e5; }
+  .meta { display: flex; gap: 8px; padding: 4px 8px; background: rgba(0, 0, 0, .6); color: #fff; font-size: 12px; }
+  .post-controls { display: flex; justify-content: flex-end; align-items: center; gap: 4px; }
+  .post-controls .actions button { border: 0; background: none; color: #6d6d6d; }
+  .post-info { font-size: 13px; }
+  .post-date { color: #919191; }
+</style>
+</head>
+<body>
+<div class="post-stream">
+  <article class="topic-post" id="post_1">
+    <div class="topic-avatar"></div>
+    <div class="topic-body">
+      <div class="names">alice</div>
+      <div class="post-info"><a class="post-date" href="/t/topic/3149487/1?u=someone"><span>Nov 10</span></a></div>
+      <div class="regular contents">
+        <div class="cooked">
+          <p>Opening paragraph with a <a href="/t/other-topic/42">topic link</a>.</p>
+          <div class="lightbox-wrapper"><a class="lightbox" href="/uploads/b733a3c9.png"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="240" height="120" alt=""><div class="meta" style="color: rgb(250, 250, 250);"><span class="filename">b733a3c9.png</span><span class="informations">1080×1474 202 KB</span></div></a></div>
+          <p>Closing paragraph</p>
+        </div>
+        <section class="post-menu-area"><nav class="post-controls"><div class="actions"><button type="button">♥</button></div></nav></section>
+      </div>
+    </div>
+  </article>
+  <article class="topic-post" id="post_2">
+    <div class="topic-avatar"></div>
+    <div class="topic-body">
+      <div class="names">bob</div>
+      <div class="post-info"><a data-post-number="2" href="/t/topic/3149487/2"><span>Nov 10</span></a></div>
+      <div class="regular contents">
+        <div class="cooked">
+          <p>Reply line one<br>Reply line two</p>
+          <div class="lightbox-wrapper"><a class="lightbox" href="/uploads/c0ffee.jpg"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="120" height="60" alt=""><div class="meta"><span class="filename">c0ffee.jpg</span><span class="informations">640×320 48 KB</span></div></a></div>
+        </div>
+        <section class="post-menu-area"><nav class="post-controls"><div class="actions"></div></nav></section>
+      </div>
+    </div>
+  </article>
+  <article class="topic-post" id="post_3">
+    <div class="topic-avatar"></div>
+    <div class="topic-body">
+      <div class="names">carol</div>
+      <div class="post-info"><a class="post-date" href="/t/topic/3149487/3"><span>Nov 10</span></a></div>
+      <div class="regular contents">
+        <div class="cooked"><div class="lightbox-wrapper"><a class="lightbox" href="/uploads/beef.png"><img src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="120" height="60" alt=""><div class="meta"><span class="filename">beef.png</span><span class="informations">300×150 12 KB</span></div></a></div></div>
+        <section class="post-menu-area"><nav class="post-controls"><div class="actions"></div></nav></section>
+      </div>
+    </div>
+  </article>
+</div>
+<script>
+  // Discourse streams posts in later and may mount the controls after the post.
+  setTimeout(() => {
+    const post = document.createElement('article');
+    post.className = 'topic-post';
+    post.id = 'post_4';
+    post.innerHTML = '<div class="topic-avatar"></div><div class="topic-body"><div class="names">dave</div>'
+      + '<div class="post-info"><a class="post-date" href="/t/topic/3149487/4"><span>Nov 10</span></a></div>'
+      + '<div class="regular contents"><div class="cooked"><p>Streamed reply</p></div></div></div>';
+    document.querySelector('.post-stream').append(post);
+    setTimeout(() => {
+      const area = document.createElement('section');
+      area.className = 'post-menu-area';
+      area.innerHTML = '<nav class="post-controls"><div class="actions"></div></nav>';
+      post.querySelector('.contents').append(area);
+    }, 200);
+  }, 300);
+</script>
+</body>
+</html>

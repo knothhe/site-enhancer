@@ -19,7 +19,9 @@ export function getPostText(post: Element): string | null {
     const hidden = Array.from(content.querySelectorAll<HTMLElement>(IGNORED), element => {
       const style = element.getAttribute('style');
       element.style.setProperty('display', 'none', 'important');
-      return () => style === null ? element.removeAttribute('style') : element.setAttribute('style', style);
+      // In a content script's isolated world, Chromium keeps an empty style=""
+      // after removeAttribute once the inline style was changed through CSSOM.
+      return () => style === null ? element.attributes.removeNamedItem('style') : element.setAttribute('style', style);
     });
     let text: string;
     try {

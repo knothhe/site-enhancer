@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="__LANG__">
+<head>
+<meta charset="utf-8">
+<title>X fixture</title>
+<style>
+  body { margin: 0; font: 15px/20px -apple-system, BlinkMacSystemFont, sans-serif; color: #0f1419; background: #fff; }
+  main { width: 600px; margin: 0 auto; border-inline: 1px solid #eff3f4; min-height: 100vh; }
+  article { position: relative; padding: 12px 48px 12px 16px; border-bottom: 1px solid #eff3f4; }
+  article a { color: #536471; text-decoration: none; }
+  [data-testid="tweetText"] { margin-top: 4px; }
+  [data-testid="caret"] { position: absolute; top: 8px; right: 12px; border: 0; background: none; font-size: 18px; cursor: pointer; }
+  .quote { margin-top: 8px; padding: 8px 12px; border: 1px solid #cfd9de; border-radius: 12px; }
+  [role="menu"] { position: fixed; min-width: 280px; background: #fff; border-radius: 12px; overflow: hidden;
+    box-shadow: rgba(101, 119, 134, .2) 0 0 15px, rgba(101, 119, 134, .15) 0 0 3px 1px; }
+  [role="menuitem"] { padding: 12px 16px; font-weight: 700; color: #0f1419; cursor: pointer; }
+  [role="menuitem"]:focus { background: #f7f9f9; outline: none; }
+</style>
+</head>
+<body>
+<main>
+  <article data-testid="tweet" id="t1">
+    <div><a href="/alice">Alice</a> · <a href="/alice/status/1234567890?s=20"><time datetime="2026-11-10T00:00:00Z">Nov 10</time></a></div>
+    <button data-testid="caret" type="button" aria-haspopup="menu" aria-label="More">⋯</button>
+    <div data-testid="tweetText"><span>First line</span><br><span>Second line </span><img alt="🎉" src="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==" width="16" height="16"></div>
+    <div class="quote" role="link">
+      <div><a href="/bob/status/999"><time datetime="2026-11-09T00:00:00Z">Nov 9</time></a></div>
+      <div data-testid="tweetText"><span>Quoted text must not be copied</span></div>
+    </div>
+    <a href="/alice/status/1234567890/analytics">Views</a>
+  </article>
+  <article data-testid="tweet" id="t2">
+    <div><a href="/carol">Carol</a> · <a href="/carol/status/42"><time datetime="2026-11-08T00:00:00Z">Nov 8</time></a></div>
+    <button data-testid="caret" type="button" aria-haspopup="menu" aria-label="More">⋯</button>
+    <div data-testid="tweetText"><span>Another post</span></div>
+  </article>
+</main>
+<div id="layers"></div>
+<script>
+  // Mimics X's caret menu: it opens on keydown with preventDefault (no click
+  // event), renders in a portal and fixes the wrapper height during opening.
+  const fixture = window.__fixture = { caretClicks: 0, opens: [] };
+  let open;
+  function closeMenu() { open?.menu.remove(); open = undefined; }
+  function openMenu(caret, via) {
+    closeMenu();
+    const rect = caret.getBoundingClientRect();
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.style.top = `${rect.bottom}px`;
+    menu.style.left = `${rect.right - 280}px`;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'fixture-height';
+    wrapper.style.height = '88px';
+    wrapper.innerHTML = '<div data-testid="Dropdown"><div role="menuitem" tabindex="-1"><span>Not interested</span></div>'
+      + '<div role="menuitem" tabindex="-1"><span>Follow</span></div></div>';
+    menu.append(wrapper);
+    document.getElementById('layers').append(menu);
+    open = { caret, menu };
+    fixture.opens.push(via);
+  }
+  for (const caret of document.querySelectorAll('[data-testid="caret"]')) {
+    caret.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      openMenu(caret, 'keydown');
+    });
+    caret.addEventListener('keyup', event => { if (event.key === ' ') event.preventDefault(); });
+    caret.addEventListener('click', () => {
+      fixture.caretClicks += 1;
+      if (open?.caret === caret) closeMenu(); else openMenu(caret, 'click');
+    });
+  }
+  document.addEventListener('click', event => {
+    if (open && !open.menu.contains(event.target) && !open.caret.contains(event.target)) closeMenu();
+  });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenu(); });
+</script>
+</body>
+</html>
