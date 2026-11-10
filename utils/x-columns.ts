@@ -125,7 +125,21 @@ export function installXColumns(options: {
 } = {}) {
   const root = document.documentElement;
   // Follow X's interface language, like the copy menu; the browser language is the fallback.
-  const t = COLUMNS_LABELS[resolveLocale(root.lang || navigator.language)];
+  // X may set or change <html lang> after document_start, so labels are re-applied on change.
+  const currentLabels = () => COLUMNS_LABELS[resolveLocale(root.lang || navigator.language)];
+  let t = currentLabels();
+  let localize: Array<() => void> = [];
+  let lastStatus: Parameters<typeof showStatus> | undefined;
+  function localized(apply: () => void) { localize.push(apply); apply(); }
+  const langObserver = new MutationObserver(() => {
+    const next = currentLabels();
+    if (next === t) return;
+    t = next;
+    localize.forEach(apply => apply());
+    if (frame) frame.title = t.frameTitle;
+    if (lastStatus && status && !status.hidden) showStatus(...lastStatus);
+  });
+  langObserver.observe(root, { attributes: true, attributeFilter: ['lang'] });
   const sheet = document.createElement('style');
   sheet.id = 'site-enhancer-columns-style';
   sheet.textContent = COLUMNS_CSS;
@@ -165,14 +179,16 @@ export function installXColumns(options: {
   const active = () => enabled && viewportWidth() >= COLUMNS_MIN_WIDTH;
   function save() {
     try { localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify(widths)); }
-    catch { showStatus(t.saveFailed, t.saveFailedHint, 'error'); }
+    catch { showStatus('saveFailed', 'saveFailedHint', 'error'); }
   }
-  function showStatus(title: string, description: string, state: 'empty' | 'loading' | 'error' = 'empty') {
+  type Label = keyof typeof COLUMNS_LABELS.en;
+  function showStatus(title: Label, description: Label, state: 'empty' | 'loading' | 'error' = 'empty') {
+    lastStatus = [title, description, state];
     status.replaceChildren();
     const heading = document.createElement('strong');
-    heading.textContent = title;
+    heading.textContent = t[title];
     const body = document.createElement('p');
-    body.textContent = description;
+    body.textContent = t[description];
     status.dataset.state = state;
     const decoration = document.createElement('span');
     decoration.className = 'se-status-icon';
@@ -192,7 +208,7 @@ export function installXColumns(options: {
     retry.hidden = true;
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    showStatus(t.empty, t.emptyHint);
+    showStatus('empty', 'emptyHint');
     if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
   function openDetail(url: string) {
@@ -206,7 +222,7 @@ export function installXColumns(options: {
     openLink.href = url;
     openLink.hidden = false;
     retry.hidden = true;
-    showStatus(t.loading, t.loadingHint, 'loading');
+    showStatus('loading', 'loadingHint', 'loading');
     const current = document.createElement('iframe');
     current.name = DETAIL_FRAME_NAME;
     current.title = t.frameTitle;
@@ -220,7 +236,7 @@ export function installXColumns(options: {
         clearInterval(timer);
         current.remove();
         frame = undefined;
-        showStatus(t.failed, t.failedHint, 'error');
+        showStatus('failed', 'failedHint', 'error');
         retry.hidden = false;
       });
     } else current.src = url;
@@ -255,7 +271,7 @@ export function installXColumns(options: {
         clearInterval(timer);
         current.remove();
         frame = undefined;
-        showStatus(t.failed, t.retryHint, 'error');
+        showStatus('failed', 'retryHint', 'error');
         retry.hidden = false;
       }
     }, 250);
@@ -280,17 +296,16 @@ export function installXColumns(options: {
     svg.append(path);
     return svg;
   }
-  function iconControl(element: HTMLElement, label: string, name: keyof typeof paths) {
+  function iconControl(element: HTMLElement, label: Label, name: keyof typeof paths) {
     element.className = 'se-column-icon';
-    element.setAttribute('aria-label', label);
-    element.title = label;
+    localized(() => { element.setAttribute('aria-label', t[label]); element.title = t[label]; });
     element.replaceChildren(icon(name));
   }
-  function button(label: string, action: () => void, name?: keyof typeof paths) {
+  function button(label: Label, action: () => void, name?: keyof typeof paths) {
     const element = document.createElement('button');
     element.type = 'button';
-    element.textContent = label;
     if (name) iconControl(element, label, name);
+    else localized(() => { element.textContent = t[label]; });
     element.addEventListener('click', action);
     return element;
   }
@@ -299,24 +314,25 @@ export function installXColumns(options: {
     if (panel || !document.body) return;
     panel = document.createElement('aside');
     panel.id = 'site-enhancer-columns';
-    panel.setAttribute('aria-label', t.panel);
+    const current = panel;
+    localized(() => current.setAttribute('aria-label', t.panel));
     const toolbar = document.createElement('div');
     toolbar.className = 'se-column-toolbar';
     const title = document.createElement('strong');
-    title.textContent = t.title;
+    localized(() => { title.textContent = t.title; });
     openLink = document.createElement('a');
-    iconControl(openLink, t.newTab, 'external');
+    iconControl(openLink, 'newTab', 'external');
     openLink.target = '_blank';
     openLink.rel = 'noopener noreferrer';
-    retry = button(t.retry, () => { if (selected) openDetail(selected); });
+    retry = button('retry', () => { if (selected) openDetail(selected); });
     const search = document.createElement('a');
     search.href = '/explore';
-    iconControl(search, t.search, 'search');
-    backButton = button(t.back, () => history.back(), 'back');
-    forwardButton = button(t.forward, () => history.forward(), 'forward');
+    iconControl(search, 'search', 'search');
+    backButton = button('back', () => history.back(), 'back');
+    forwardButton = button('forward', () => history.forward(), 'forward');
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    toolbar.append(title, backButton, forwardButton, search, button(t.reset, reset, 'reset'), openLink, button(t.close, () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    toolbar.append(title, backButton, forwardButton, search, button('reset', reset, 'reset'), openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -335,8 +351,10 @@ export function installXColumns(options: {
       divider.tabIndex = 0;
       divider.setAttribute('role', 'separator');
       divider.setAttribute('aria-orientation', 'vertical');
-      divider.setAttribute('aria-label', kind === 0 ? t.resizeNav : t.resizeDetail);
-      divider.title = t.resizeHint;
+      localized(() => {
+        divider.setAttribute('aria-label', kind === 0 ? t.resizeNav : t.resizeDetail);
+        divider.title = t.resizeHint;
+      });
       divider.addEventListener('dblclick', reset);
       divider.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
@@ -435,6 +453,8 @@ export function installXColumns(options: {
     frame = undefined;
     dividers.forEach(divider => divider.remove());
     dividers = [];
+    localize = [];
+    lastStatus = undefined;
     for (const name of ['data-site-enhancer-columns', 'data-site-enhancer-compact-nav', 'data-site-enhancer-resizing']) root.removeAttribute(name);
     for (const name of ['--se-nav', '--se-feed', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
   }
@@ -484,6 +504,7 @@ export function installXColumns(options: {
     onNavigate() { if (panel && !history.restore()) closeDetail(false); syncHeader(); refresh(); },
     remove() {
       disposed = true;
+      langObserver.disconnect();
       unmount();
       sheet.remove();
       history.remove();

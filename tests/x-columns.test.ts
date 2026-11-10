@@ -227,3 +227,18 @@ test('follows the X page language and uses English outside Chinese', () => {
   const labels = Array.from(document.querySelectorAll('#site-enhancer-columns :is(button, a)'), element => element.getAttribute('aria-label') ?? element.textContent);
   assert.ok(labels.includes('Close') && labels.includes('Back') && labels.includes('New tab'), labels.join(','));
 });
+
+test('re-labels the panel when X sets its language after start', async () => {
+  document.documentElement.lang = '';
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'navigator')!;
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { language: 'en-US' } });
+  try { start(); } finally { Object.defineProperty(globalThis, 'navigator', original); }
+  const panel = document.querySelector('#site-enhancer-columns')!;
+  assert.match(panel.textContent!, /Select a post/);
+  document.documentElement.lang = 'zh-CN';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.match(panel.textContent!, /选择一条推文/);
+  assert.equal(panel.getAttribute('aria-label'), '推文详情');
+  assert.ok(document.querySelector('#site-enhancer-columns [aria-label="关闭"]'));
+  assert.equal(document.querySelector('.se-column-divider')!.getAttribute('aria-label'), '调整导航栏宽度');
+});
