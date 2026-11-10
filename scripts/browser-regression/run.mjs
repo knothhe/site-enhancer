@@ -10,7 +10,7 @@
 // interception; every other request is blocked. Exits 1 when any assertion
 // fails. Screenshots and report.json go to the output directory.
 import { spawn, spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,8 +108,11 @@ const fixtures = {
   x: readFileSync(join(here, 'fixtures/x.html'), 'utf8'),
   'linux-do': readFileSync(join(here, 'fixtures/linux-do.html'), 'utf8'),
 };
-rmSync(outDir, { recursive: true, force: true });
+// Replace only artifacts this command writes; --out may point at an existing directory.
 mkdirSync(outDir, { recursive: true });
+for (const name of readdirSync(outDir)) {
+  if (name === 'report.json' || /^(?:x|linux-do|popup)-[\w-]+\.png$/.test(name)) rmSync(join(outDir, name), { force: true });
+}
 
 // -------------------------------------------------------------- browser ---
 
@@ -206,8 +209,11 @@ async function openPage({ url, width = 1000, height = 700, scale = 1, dark = fal
       const start = Date.now();
       let last;
       while (Date.now() - start < timeout) {
-        last = await page.eval(expression).catch(error => error.message);
-        if (last && last !== false) return last;
+        // Evaluation errors (e.g. a context destroyed by navigation) are retried, never success.
+        let value;
+        try { value = await page.eval(expression); } catch (error) { last = `error: ${error.message}`; await sleep(50); continue; }
+        if (value) return value;
+        last = value;
         await sleep(50);
       }
       throw new Error(`Timed out waiting for ${description} (last: ${JSON.stringify(last)})`);
