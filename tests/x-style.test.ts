@@ -67,3 +67,32 @@ test('layout styles leave the original page untouched, set no colors and scope h
   const sheet = new win.CSSStyleSheet();
   assert.doesNotThrow(() => sheet.replaceSync(X_STYLE_CSS));
 });
+
+test('clean styles hide profile upsells without hiding profile details or posts', () => {
+  // X places an analytics upsell three divs below the wrapper containing the entire profile.
+  document.body.innerHTML = `<div data-testid="primaryColumn">
+    <div id="profile"><div><a href="/someone/header_photo">Cover</a><div>
+      <div data-testid="UserName">Someone</div>
+      <div data-testid="analytics-preview"><div>Only visible to you</div><div>
+        <div>Post impressions</div><a href="/i/premium_sign_up">Unlock analytics</a>
+      </div></div>
+    </div></div><div role="tablist">Posts Replies</div>
+    <section><article data-testid="tweet"><time>Now</time>Profile post</article></section></div>
+    <div id="verification"><div><div><div><a href="/i/premium_sign_up">Get verified</a></div></div></div></div>
+  </div>`;
+  const style = installXStyle('columns');
+  style.setPage('/someone');
+  for (const mode of ['clean', 'columns', 'reading'] as const) {
+    style.setStyle(mode);
+    for (const selector of ['#profile', '[data-testid="UserName"]', '[role="tablist"]', 'article']) {
+      let element: Element | null = document.querySelector(selector);
+      while (element) {
+        assert.notEqual(getComputedStyle(element).display, 'none', `${mode}: ${selector} has a hidden ancestor`);
+        element = element.parentElement;
+      }
+    }
+    assert.equal(getComputedStyle(document.querySelector('[data-testid="analytics-preview"]')!).display, 'none');
+    assert.equal(getComputedStyle(document.querySelector('#verification a')!).display, 'none');
+  }
+  style.remove();
+});
