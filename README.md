@@ -55,6 +55,8 @@ The extension adds four copy actions to the native **More (⋯)** menu on each t
 
 **Copy post as image** opens a screenshot preview before copying. Choose **Copy image** to copy the displayed PNG, or close with Escape. The image has 24px outer padding and an opaque background matching the current page theme, with white as the fallback. In a post detail view, a reply includes the page's original post when it is still rendered above the reply; standalone posts and comments are captured individually. Only the selected articles are included, without intervening replies or the menu. The same action is available in the three-column detail pane.
 
+In the three-column image viewer, choose **Copy image** in the toolbar or press **C** to copy the current original image as a full-resolution PNG. Zoom and pan do not crop the copied image. Copying is disabled while switching images; success and failure messages appear below the image, and failed copies can be retried.
+
 **Copy post link** copies only the canonical post URL, without text or tracking parameters. These actions are also available inside the three-column detail pane. Quote cards in the timeline and detail pane open the quoted post in the detail pane and participate in back/forward history.
 
 Menu labels follow the page language (Chinese or English) and colors follow the native menu. Media-only posts can be copied with their link. For long posts, expand **Show more** before copying; the extension copies the currently rendered text.

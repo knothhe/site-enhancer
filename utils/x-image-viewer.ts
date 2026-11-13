@@ -1,5 +1,6 @@
 import { createImageMotion } from './x-image-motion.ts';
 import { resolveLocale } from './i18n.ts';
+import { imageToPng } from './image-clipboard.ts';
 
 type Photo = { src: string; alt: string; preview?: string };
 const ICONS = {
@@ -10,6 +11,7 @@ const ICONS = {
   actual: 'M7 8v8M5 9l2-1M17 8v8M15 9l2-1M11 10h.01M11 14h.01',
   retry: 'M4 4v5h5M4 9a8 8 0 1 1-1 7',
   help: 'M9 9a3 3 0 1 1 5 2c-2 1-2 2-2 3M12 17h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18',
+  copy: 'M9 9h12v12H9zM15 9V3H3v12h6',
 };
 /** One top-level viewer shared by timeline and same-origin detail documents. */
 export function installXImageViewer() {
@@ -101,6 +103,7 @@ export function installXImageViewer() {
     };
     const requests = new Map<number, ImageRequest>();
     let disposed = false;
+    let copyController: AbortController | undefined;
     // One download/decode per image, shared by background warming and foreground navigation.
     function requestImage(target: number, priority: 'high' | 'low'): ImageRequest {
       const existing = requests.get(target);
@@ -152,14 +155,14 @@ export function installXImageViewer() {
     }
     const help = document.createElement('p');
     help.className = 'se-image-help';
-    help.textContent = zh ? '← → / 触摸板横滑切图 · + / − 缩放 · ? 快捷键 · Esc 关闭' : '← → / Swipe to browse · + / − Zoom · ? Shortcuts · Esc Close';
+    help.textContent = zh ? '← → / 触摸板横滑切图 · + / − 缩放 · C 复制图片 · ? 快捷键 · Esc 关闭' : '← → / Swipe to browse · + / − Zoom · C Copy image · ? Shortcuts · Esc Close';
     const shortcuts = document.createElement('div');
     shortcuts.className = 'se-image-shortcuts';
     shortcuts.id = 'se-image-shortcuts';
     shortcuts.hidden = true;
     shortcuts.textContent = zh
-      ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
-      : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
+      ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；C 复制图片；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
+      : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; C: copy image; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
     const scaleLabel = document.createElement('span');
     scaleLabel.className = 'se-image-scale';
     let scale = 1;
@@ -251,6 +254,36 @@ export function installXImageViewer() {
     const zoomIn = button(zh ? '放大' : 'Zoom in', () => zoom(scale * 1.25), 'in', '+ =');
     const fit = button(zh ? '适应窗口' : 'Fit to window', fitImage, 'fit', '0 F');
     const actual = button(zh ? '原始大小' : 'Actual size', () => zoom(1), 'actual', '1');
+    const copyStatus = document.createElement('p');
+    copyStatus.className = 'se-image-help se-image-feedback';
+    copyStatus.setAttribute('role', 'status');
+    const copy = button(zh ? '复制图片' : 'Copy image', () => { void copyImage(); }, 'copy', 'C');
+    copy.disabled = true;
+    async function copyImage() {
+      if (copy.disabled || disposed) return;
+      const controller = new AbortController();
+      copyController = controller;
+      copy.disabled = true;
+      copyStatus.textContent = zh ? '正在复制图片…' : 'Copying image…';
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        // Start the clipboard write within the user gesture, before fetching/encoding.
+        const png = imageToPng(photos[displayedIndex].src, controller.signal);
+        // Observe rejection even if ClipboardItem construction or write fails synchronously.
+        void png.catch(() => {});
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+        if (!disposed && copyController === controller) copyStatus.textContent = zh ? '已复制图片' : 'Image copied';
+      } catch {
+        if (!disposed && copyController === controller) copyStatus.textContent = zh ? '复制失败，请重试' : 'Copy failed. Please try again.';
+      } finally {
+        clearTimeout(timeout);
+        controller.abort();
+        if (!disposed && copyController === controller) {
+          copyController = undefined;
+          copy.disabled = !loaded || displayedIndex !== index;
+        }
+      }
+    }
     const toggleHelp = () => {
       shortcuts.hidden = !shortcuts.hidden;
       helpButton.setAttribute('aria-expanded', String(!shortcuts.hidden));
@@ -259,6 +292,8 @@ export function installXImageViewer() {
     helpButton.setAttribute('aria-expanded', 'false');
     helpButton.setAttribute('aria-controls', shortcuts.id);
     function show(value: number, fromSwipe = false) {
+      copyController?.abort(); copyController = undefined;
+      copy.disabled = true; copyStatus.textContent = '';
       if (!fromSwipe) stopSwipe();
       clearPreview();
       index = Math.max(0, Math.min(photos.length - 1, value));
@@ -282,6 +317,7 @@ export function installXImageViewer() {
       current.setAttribute('aria-busy', 'true');
       // Returning to the still-visible image cancels the pending switch without resetting its view.
       if (displayedIndex === index) {
+        copy.disabled = false;
         current.removeAttribute('aria-busy'); render(); return;
       }
       const targetIndex = index;
@@ -293,6 +329,7 @@ export function installXImageViewer() {
           img = candidate;
           img.hidden = true; img.removeAttribute('data-pending');
           loaded = true; displayedIndex = targetIndex;
+          copy.disabled = false;
           decoded.set(targetIndex, img);
           notice.hidden = true; retry.hidden = true; feedback.textContent = '';
           current.removeAttribute('aria-busy');
@@ -471,11 +508,11 @@ export function installXImageViewer() {
     });
     current.addEventListener('click', event => { if (event.target === current) close(); });
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(type, endDrag);
-    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, zoomOut, scaleLabel, zoomIn, fit, actual, previous, next, helpButton);
+    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, zoomOut, scaleLabel, zoomIn, fit, actual, copy, previous, next, helpButton);
     canvas.append(img); stage.append(canvas);
     notice.append(feedback, retry);
     viewport.append(stage, sidePrevious, sideNext, notice);
-    current.append(style, toolbar, viewport, help, shortcuts);
+    current.append(style, toolbar, viewport, copyStatus, help, shortcuts);
     current.addEventListener('cancel', event => { event.preventDefault(); close(); });
     document.body.append(current);
     show(index);
@@ -500,6 +537,7 @@ export function installXImageViewer() {
       else if (key === '-') action = () => zoom(scale / 1.25);
       else if (key === '0' || key === 'f') action = fitImage;
       else if (key === '1') action = () => zoom(1);
+      else if (key === 'c') action = () => { if (!event.repeat) void copyImage(); };
       else if (key === 'r' && !retry.hidden) action = () => show(index);
       else if (key === 'home') action = () => navigate(0);
       else if (key === 'end') action = () => navigate(photos.length - 1);
@@ -527,6 +565,7 @@ export function installXImageViewer() {
     window.addEventListener('blur', blur);
     disposeOpenView = () => {
       disposed = true;
+      copyController?.abort(); copyController = undefined;
       clearPreview();
       stopSwipe();
       ++generation; clearTimeout(noticeTimer); cancelPending?.();

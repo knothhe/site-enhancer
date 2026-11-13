@@ -335,6 +335,67 @@ async function openMeasuredImage() {
   return { stage, img, control };
 }
 
+test('image copy writes original-resolution PNG, reports failure, and supports retry with C', { timeout: 2000 }, async t => {
+  const { control } = await openMeasuredImage();
+  const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const originalItem = Object.getOwnPropertyDescriptor(globalThis, 'ClipboardItem');
+  const originalBitmap = Object.getOwnPropertyDescriptor(globalThis, 'createImageBitmap');
+  t.after(() => {
+    for (const [name, descriptor] of [['navigator', originalNavigator], ['ClipboardItem', originalItem], ['createImageBitmap', originalBitmap]] as const) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  });
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: win.navigator });
+  Object.defineProperty(globalThis, 'ClipboardItem', { configurable: true, value: class { data: Record<string, Promise<Blob>>; constructor(data: Record<string, Promise<Blob>>) { this.data = data; } } });
+  let closed = 0;
+  Object.defineProperty(globalThis, 'createImageBitmap', { configurable: true, value: async () => ({ width: 1600, height: 1200, close() { closed++; } }) });
+  const fetches: string[] = [];
+  t.mock.method(globalThis, 'fetch', async (url: string) => {
+    fetches.push(url); return new Response(new Blob(['original'], { type: 'image/jpeg' }));
+  });
+  const png = new Blob(['encoded'], { type: 'image/png' });
+  t.mock.method(win.HTMLCanvasElement.prototype, 'getContext', function(this: HTMLCanvasElement) {
+    assert.equal(this.width, 1600); assert.equal(this.height, 1200);
+    return { drawImage() {} };
+  });
+  t.mock.method(win.HTMLCanvasElement.prototype, 'toBlob', (done: (blob: Blob) => void, type: string) => { assert.equal(type, 'image/png'); done(png); });
+  let reject = true, writes = 0;
+  t.mock.method(win.navigator.clipboard, 'write', async (items: { data: Record<string, Promise<Blob>> }[]) => {
+    writes++;
+    assert.equal(await items[0].data['image/png'], png);
+    if (reject) throw new Error('Clipboard denied');
+  });
+  control('复制图片').click();
+  assert.equal(writes, 1, 'clipboard write begins synchronously within the click');
+  assert.equal(control('复制图片').disabled, true);
+  while (control('复制图片').disabled) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.match(document.querySelector('dialog')!.textContent!, /复制失败，请重试/);
+  assert.equal(control('复制图片').disabled, false);
+  reject = false;
+  viewerKey('c');
+  while (control('复制图片').disabled) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.match(document.querySelector('dialog')!.textContent!, /已复制图片/);
+  assert.equal(writes, 2);
+  assert.equal(closed, 2);
+  assert.deepEqual(fetches, Array(2).fill('https://pbs.twimg.com/media/large?format=jpg&name=orig'));
+});
+
+test('image copy is disabled until the selected image is decoded, including failed switches', async () => {
+  addGalleryPhotos();
+  start(); click('[data-testid="tweetPhoto"] img');
+  const copy = document.querySelector<HTMLButtonElement>('dialog [aria-label="复制图片"]')!;
+  assert.equal(copy.disabled, true);
+  loadImage(document.querySelector('dialog img')!); await Promise.resolve();
+  assert.equal(copy.disabled, false);
+  viewerKey('ArrowRight');
+  assert.equal(copy.disabled, true);
+  document.querySelector('dialog img[data-pending]')!.dispatchEvent(new win.Event('error') as unknown as Event);
+  assert.equal(copy.disabled, true);
+  viewerKey('Home');
+  assert.equal(copy.disabled, false);
+});
+
 test('image zoom is bounded, fits initially, and resets scroll offsets', async () => {
   const { stage, img, control } = await openMeasuredImage();
   assert.equal(img.style.width, '800px');
