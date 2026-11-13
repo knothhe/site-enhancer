@@ -45,13 +45,15 @@ The popup design and its loading, success, and failure states can be reviewed at
 ## How It Works
 
 ### On X.com / Twitter
-The extension adds three copy actions to the native **More (⋯)** menu on each tweet:
+The extension adds four copy actions to the native **More (⋯)** menu on each tweet:
 
 1. 🔗 **Copy post with link** - Copies with link
    - Format: `Tweet content` + `Tweet URL` + `#X`
 
 2. 📄 **Copy post text only** - Copies text only
    - Format: Just the tweet text, preserving line breaks and emoji
+
+**Copy post as image** opens a screenshot preview before copying. Choose **Copy image** to copy the displayed PNG, or close with Escape. The image has 24px outer padding and an opaque background matching the current page theme, with white as the fallback. In a post detail view, a reply includes the page's original post when it is still rendered above the reply; standalone posts and comments are captured individually. Only the selected articles are included, without intervening replies or the menu. The same action is available in the three-column detail pane.
 
 **Copy post link** copies only the canonical post URL, without text or tracking parameters. These actions are also available inside the three-column detail pane. Quote cards in the timeline and detail pane open the quoted post in the detail pane and participate in back/forward history.
 

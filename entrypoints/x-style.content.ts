@@ -1,3 +1,4 @@
+import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-ready';
 import { DETAIL_FRAME_CSS, DETAIL_FRAME_NAME, installXColumns } from '../utils/x-columns';
 import { installXStyle } from '../utils/x-style';
 import { installXTheme } from '../utils/x-theme';
@@ -20,6 +21,9 @@ export default defineContentScript({
       frameStyle.textContent = DETAIL_FRAME_CSS;
       (document.head ?? document.documentElement).append(frameStyle);
       ctx.onInvalidated(() => frameStyle.remove());
+      ctx.onInvalidated(observeDetailReady(document, () => {
+        window.parent.postMessage({ type: DETAIL_READY_MESSAGE }, location.origin);
+      }));
     }
     const columns = isDetail ? undefined : installXColumns({
       async prepareDetail(url) {

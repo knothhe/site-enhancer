@@ -1,9 +1,12 @@
+import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
+import { installXImageViewer } from './x-image-viewer.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
 import { resolveLocale, type Locale } from './i18n.ts';
 /** Three-column layout. The timeline remains owned by X; details use a same-origin frame. */
 export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
+export const COLUMNS_COLLAPSED_KEY = 'site-enhancer:x-nav-collapsed';
 export const DETAIL_FRAME_NAME = 'site-enhancer-x-detail';
 export type ColumnWidths = { nav: number; share: number };
 export const DEFAULT_COLUMNS: ColumnWidths = { nav: 200, share: .52 };
@@ -62,9 +65,24 @@ ${SCOPE} main[role="main"]>div,${SCOPE} div:has(>[data-testid="primaryColumn"]),
 ${SCOPE} [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 ${SCOPE} [data-testid="sidebarColumn"]{display:none!important}
 ${SCOPE} [data-site-enhancer-selected]{box-shadow:inset 2px 0 color-mix(in srgb,var(--se-x-accent,#1d9bf0) 55%,transparent);background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 4%,transparent)!important}
-${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] nav a>div>div:last-child:not(:first-child){display:none!important}
-${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_NewTweet_Button"]{max-width:64px!important}
+/* Compact navigation keeps every glyph on the same 24px / 48px grid. */
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"]>div>div>div{padding-left:0!important;padding-right:0!important;align-items:center!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] nav{width:100%!important;align-items:center!important;gap:4px!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] :is(nav a,nav button,nav [role="button"],h1 a,[data-testid="SideNav_NewTweet_Button"],[data-testid="SideNav_AccountSwitcher_Button"]){box-sizing:border-box!important;align-items:center!important;justify-content:center!important;width:48px!important;min-width:48px!important;max-width:48px!important;height:48px!important;min-height:48px!important;padding:0!important;margin-left:auto!important;margin-right:auto!important;flex-shrink:0!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] :is(nav a,nav button,nav [role="button"])>div{display:flex!important;align-items:center!important;justify-content:center!important;padding:12px!important;gap:0!important;margin:0!important;width:48px!important;height:48px!important;box-sizing:border-box!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] :is(nav a,nav button,nav [role="button"])>div>div:last-child:not(:first-child){display:none!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] :is(nav,h1) svg{width:24px!important;height:24px!important;min-width:24px!important;flex-shrink:0!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] h1{align-self:center!important;margin-left:auto!important;margin-right:auto!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_NewTweet_Button"]{background:var(--se-x-text,#0f1419)!important;color:var(--se-x-bg,#fff)!important;text-decoration:none!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_NewTweet_Button"]>div{display:none!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_NewTweet_Button"]::before{content:'';display:block;width:24px;height:24px;background:currentColor;clip-path:polygon(46% 12%,54% 12%,54% 46%,88% 46%,88% 54%,54% 54%,54% 88%,46% 88%,46% 54%,12% 54%,12% 46%,46% 46%)}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:not(:first-child){display:none!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:first-child{width:24px!important;height:24px!important;min-width:24px!important;flex-basis:24px!important}
+${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"] :is(img,[data-testid^="UserAvatar-Container"]){width:24px!important;height:24px!important;min-width:24px!important}
+#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 18px);top:72px;z-index:5;width:32px;height:32px;padding:6px;border:1px solid var(--se-column-line);border-radius:50%;background:var(--se-x-bg,#fff);color:var(--se-x-text,#536471);cursor:pointer}
+#site-enhancer-nav-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65}
+#site-enhancer-nav-toggle:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
+.se-column-divider[hidden]{display:none}
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
 #site-enhancer-columns *{box-sizing:border-box}
 #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid var(--se-column-line)}
@@ -78,6 +96,8 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
 #site-enhancer-columns [hidden]{display:none!important}
+/* Retain the cached browsing viewport: display:none resets inner layout and scroll in Chromium. */
+#site-enhancer-columns iframe[hidden]{display:block!important;position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px));visibility:hidden!important;pointer-events:none}
 #site-enhancer-columns .se-column-status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 28px 96px;text-align:center;color:inherit}
 #site-enhancer-columns .se-column-status strong{font-size:18px;font-weight:600;letter-spacing:-.02em}
 #site-enhancer-columns .se-column-status p{color:var(--se-x-muted,var(--se-native-muted,#65717b));line-height:1.8;max-width:260px;margin:12px 0 0}
@@ -97,6 +117,7 @@ ${SCOPE}[data-site-enhancer-resizing],${SCOPE}[data-site-enhancer-resizing] *{cu
 `;
 
 const zh = {
+  collapseNav: '收起侧边栏', expandNav: '展开侧边栏',
   saveFailed: '栏宽已调整，但无法保存', saveFailedHint: '本次页面仍会使用当前宽度。',
   empty: '选择一条推文', emptyHint: '点击时间线中的推文，在这里查看详情和回复。',
   loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
@@ -109,6 +130,7 @@ const zh = {
 export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
   zh,
   en: {
+    collapseNav: 'Collapse sidebar', expandNav: 'Expand sidebar',
     saveFailed: 'Column widths changed but couldn’t be saved', saveFailedHint: 'This page keeps the current widths.',
     empty: 'Select a post', emptyHint: 'Click a post in the timeline to see it and its replies here.',
     loading: 'Loading post…', loadingHint: 'The timeline stays where it is.',
@@ -124,6 +146,10 @@ export function installXColumns(options: {
   releaseDetail?: () => void;
 } = {}) {
   const root = document.documentElement;
+  const imageViewer = installXImageViewer();
+  let collapsed = false;
+  let navToggle: HTMLButtonElement | undefined;
+  try { collapsed = localStorage.getItem(COLUMNS_COLLAPSED_KEY) === 'true'; } catch { /* Optional preference. */ }
   // Follow X's interface language, like the copy menu; the browser language is the fallback.
   // X may set or change <html lang> after document_start, so labels are re-applied on change.
   const currentLabels = () => COLUMNS_LABELS[resolveLocale(root.lang || navigator.language)];
@@ -148,6 +174,11 @@ export function installXColumns(options: {
   let disposed = false;
   let panel: HTMLElement | undefined;
   let frame: HTMLIFrameElement | undefined;
+  // Keep only the current and most recent ready document connected, preserving scroll and reply drafts.
+  const readyFrames = new Map<string, { frame: HTMLIFrameElement; doc: Document; scrollX: number; scrollY: number }>();
+  const frameDocuments = new Map<HTMLIFrameElement, Document>();
+  let checkFrame: (() => void) | undefined;
+  let loadingFrame: HTMLIFrameElement | undefined;
   let status: HTMLElement;
   let openLink: HTMLAnchorElement;
   let retry: HTMLButtonElement;
@@ -166,7 +197,10 @@ export function installXColumns(options: {
   let forwardButton: HTMLButtonElement;
   const history = installDetailHistory(url => {
     if (!panel) return;
-    if (url) { if (selected !== url || !frame) openDetail(url); }
+    if (url) {
+      const cached = readyFrames.get(url);
+      if (selected !== url || !frame || (cached && !reusable(url, cached))) openDetail(url);
+    }
     else closeDetail(false);
   }, () => {
     if (!panel) return;
@@ -196,10 +230,48 @@ export function installXColumns(options: {
     status.append(decoration, heading, body, retry);
     status.hidden = false;
   }
+  function stopFrameWatch() {
+    clearInterval(timer);
+    if (loadingFrame && checkFrame) loadingFrame.removeEventListener('load', checkFrame);
+    loadingFrame = undefined; checkFrame = undefined;
+  }
+  function discardFrame(target: HTMLIFrameElement) {
+    frameDocuments.get(target)?.removeEventListener('click', click, true);
+    frameDocuments.delete(target);
+    for (const [url, entry] of readyFrames) if (entry.frame === target) readyFrames.delete(url);
+    target.remove();
+  }
+  function clearFrames() {
+    stopFrameWatch();
+    for (const entry of [...readyFrames.values()]) discardFrame(entry.frame);
+    if (frame) discardFrame(frame);
+  }
+  function reusable(url: string, entry: { frame: HTMLIFrameElement; doc: Document }) {
+    try {
+      return entry.frame.isConnected && entry.frame.contentDocument === entry.doc &&
+        detailUrl(entry.doc.location.origin + entry.doc.location.pathname, location.origin) === url;
+    } catch { return false; }
+  }
+  function parkFrame() {
+    stopFrameWatch();
+    if (!frame) return;
+    const entry = selected && readyFrames.get(selected);
+    if (entry && entry.frame === frame && reusable(selected!, entry)) {
+      entry.scrollX = entry.doc.defaultView?.scrollX || entry.doc.documentElement.scrollLeft;
+      entry.scrollY = entry.doc.defaultView?.scrollY || entry.doc.documentElement.scrollTop;
+      frame.hidden = true;
+      for (const media of entry.doc.querySelectorAll<HTMLMediaElement>('video,audio')) {
+        if (!media.paused) media.pause();
+      }
+    } else discardFrame(frame);
+  }
+  function detailReady(event: MessageEvent) {
+    if (event.origin !== location.origin || event.source !== frame?.contentWindow || event.data?.type !== DETAIL_READY_MESSAGE) return;
+    checkFrame?.();
+  }
   function closeDetail(restoreFocus = true) {
     if (frame || selected) options.releaseDetail?.();
-    clearInterval(timer);
-    frame?.remove();
+    clearFrames();
     frame = undefined;
     selected = undefined;
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
@@ -216,12 +288,23 @@ export function installXColumns(options: {
     selectedArticle = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(article =>
       detailUrl(postPermalink(article) ?? '', location.origin) === url);
     selectedArticle?.setAttribute('data-site-enhancer-selected', '');
-    clearInterval(timer);
-    frame?.remove();
+    parkFrame();
+    frame = undefined;
     selected = url;
     openLink.href = url;
     openLink.hidden = false;
     retry.hidden = true;
+    const cached = readyFrames.get(url);
+    if (cached && reusable(url, cached)) {
+      readyFrames.delete(url); readyFrames.set(url, cached);
+      frame = cached.frame; frame.hidden = false; frame.title = t.frameTitle;
+      status.hidden = true;
+      cached.doc.defaultView?.scrollTo(cached.scrollX, cached.scrollY);
+      return;
+    }
+    if (cached) discardFrame(cached.frame);
+    // Bound the cache to two connected frames, including the incoming load.
+    while (readyFrames.size > 1) discardFrame(readyFrames.values().next().value!.frame);
     showStatus('loading', 'loadingHint', 'loading');
     const current = document.createElement('iframe');
     current.name = DETAIL_FRAME_NAME;
@@ -233,8 +316,8 @@ export function installXColumns(options: {
         if (frame === current && panel && !disposed) current.src = prepared;
       }).catch(() => {
         if (frame !== current || !panel || disposed) return;
-        clearInterval(timer);
-        current.remove();
+        stopFrameWatch();
+        discardFrame(current);
         frame = undefined;
         showStatus('failed', 'failedHint', 'error');
         retry.hidden = false;
@@ -244,7 +327,7 @@ export function installXColumns(options: {
     frame = current;
     panel!.append(current);
     const started = Date.now();
-    timer = setInterval(() => {
+    const check = () => {
       if (frame !== current || !panel || disposed) return;
       try {
         const doc = current.contentDocument;
@@ -259,22 +342,29 @@ export function installXColumns(options: {
           if (primary && (primary.querySelector('[data-testid="tweet"]') ||
             (Date.now() - started > 1500 && !primary.querySelector('[role="progressbar"]') && (primary.textContent?.length ?? 0) > 50))) {
             doc.addEventListener('click', click, true);
+            frameDocuments.set(current, doc);
+            readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
+            while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
             current.style.visibility = '';
             status.hidden = true;
             retry.hidden = true;
-            clearInterval(timer);
+            stopFrameWatch();
             return;
           }
         }
       } catch { /* Cross-origin redirects or a blocked frame fall back to a normal link. */ }
       if (Date.now() - started > 20000) {
-        clearInterval(timer);
-        current.remove();
+        stopFrameWatch();
+        discardFrame(current);
         frame = undefined;
         showStatus('failed', 'retryHint', 'error');
         retry.hidden = false;
       }
-    }, 250);
+    };
+    checkFrame = check; loadingFrame = current;
+    current.addEventListener('load', check);
+    // Fallback for blocked/missing frame scripts and error pages; normal readiness is event-driven.
+    timer = setInterval(check, 250);
   }
   const paths = {
     back: 'M15 5l-7 7 7 7',
@@ -309,7 +399,22 @@ export function installXColumns(options: {
     element.addEventListener('click', action);
     return element;
   }
-  function reset() { widths = { ...DEFAULT_COLUMNS }; renderWidths(); save(); }
+  function reset() { collapsed = false; saveCollapsed(); widths = { ...DEFAULT_COLUMNS }; renderWidths(); save(); }
+  function saveCollapsed() {
+    try { localStorage.setItem(COLUMNS_COLLAPSED_KEY, String(collapsed)); }
+    catch { /* Keep the current page preference when storage is unavailable. */ }
+  }
+  function renderToggle() {
+    if (!navToggle) return;
+    navToggle.title = collapsed ? t.expandNav : t.collapseNav;
+    navToggle.setAttribute('aria-label', navToggle.title);
+    navToggle.setAttribute('aria-expanded', String(!collapsed));
+    const direction = collapsed ? 'forward' : 'back';
+    if (navToggle.dataset.direction !== direction) {
+      navToggle.dataset.direction = direction;
+      navToggle.replaceChildren(icon(direction));
+    }
+  }
   function mount() {
     if (panel || !document.body) return;
     panel = document.createElement('aside');
@@ -338,6 +443,12 @@ export function installXColumns(options: {
     status.setAttribute('role', 'status');
     panel.append(toolbar, status);
     document.body.append(panel);
+    navToggle = document.createElement('button');
+    navToggle.type = 'button';
+    navToggle.id = 'site-enhancer-nav-toggle';
+    localized(renderToggle);
+    navToggle.addEventListener('click', () => { end(); collapsed = !collapsed; saveCollapsed(); renderWidths(); });
+    document.body.append(navToggle);
     bodyObserver = new MutationObserver(renderWidths);
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
     sizeObserver = new window.ResizeObserver(() => { syncHeader(); renderWidths(); });
@@ -399,12 +510,14 @@ export function installXColumns(options: {
   }
   function renderWidths() {
     if (!panel) return;
-    const { nav, feed, detail } = columnGeometry(viewportWidth(), widths);
+    const { nav, feed, detail } = columnGeometry(viewportWidth(), collapsed ? { ...widths, nav: 88 } : widths);
     root.style.setProperty('--se-nav', `${nav}px`);
     root.style.setProperty('--se-feed', `${feed}px`);
     root.style.setProperty('--se-detail', `${detail}px`);
     root.toggleAttribute('data-site-enhancer-compact-nav', nav < 180);
+    renderToggle();
     dividers.forEach((divider, index) => {
+      divider.hidden = index === 0 && collapsed;
       divider.style.left = `${index === 0 ? nav : nav + feed}px`;
       divider.setAttribute('aria-valuenow', String(index === 0 ? nav : feed));
       divider.setAttribute('aria-valuemin', index === 0 ? '88' : '360');
@@ -416,10 +529,12 @@ export function installXColumns(options: {
     panel.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
     panel.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
     panel.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
+    navToggle?.style.setProperty('background', 'var(--se-x-bg,' + (background === 'rgba(0, 0, 0, 0)' ? '#fff' : background) + ')');
+    navToggle?.style.setProperty('color', `var(--se-x-text,${dark ? '#e7e9ea' : '#536471'})`);
   }
   function adjust(kind: number, delta: number) {
-    const { nav, feed } = columnGeometry(viewportWidth(), widths);
-    if (kind === 0) widths.nav = Math.max(88, Math.min(280, nav + delta));
+    const { nav, feed } = columnGeometry(viewportWidth(), collapsed ? { ...widths, nav: 88 } : widths);
+    if (kind === 0) { collapsed = false; widths.nav = Math.max(88, Math.min(280, nav + delta)); }
     else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(viewportWidth() - nav - 360, feed + delta)) / (viewportWidth() - nav)));
     renderWidths();
   }
@@ -437,9 +552,12 @@ export function installXColumns(options: {
   }
   function blur() { end(); }
   function unmount() {
+    imageViewer.close();
+    navToggle?.remove();
+    navToggle = undefined;
     if (frame || selected) options.releaseDetail?.();
     selected = undefined;
-    clearInterval(timer);
+    clearFrames();
     drag = undefined;
     bodyObserver?.disconnect();
     headerObserver?.disconnect();
@@ -468,6 +586,7 @@ export function installXColumns(options: {
     if (!active() || !panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (!target?.closest('[data-testid="primaryColumn"]') || !target.closest('article[data-testid="tweet"]')) return;
+    if (imageViewer.handleClick(event)) return;
     if (target.closest('button,[role="button"],input,textarea,select,video,[contenteditable="true"]')) return;
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;
     const link = target.closest<HTMLAnchorElement>('a[href]');
@@ -488,6 +607,7 @@ export function installXColumns(options: {
     history.select(url);
   }
   function storage(event: StorageEvent) {
+    if (event.key === COLUMNS_COLLAPSED_KEY) { collapsed = event.newValue === 'true'; renderWidths(); return; }
     if (event.key !== COLUMNS_WIDTH_KEY) return;
     try { widths = parseColumnWidths(JSON.parse(event.newValue ?? 'null')); renderWidths(); } catch { /* Ignore invalid cross-tab data. */ }
   }
@@ -499,6 +619,7 @@ export function installXColumns(options: {
   window.addEventListener('pointercancel', end);
   window.addEventListener('blur', blur);
   window.addEventListener('storage', storage);
+  window.addEventListener('message', detailReady);
   return {
     setEnabled(value: boolean) { enabled = value; refresh(); },
     onNavigate() { if (panel && !history.restore()) closeDetail(false); syncHeader(); refresh(); },
@@ -515,6 +636,7 @@ export function installXColumns(options: {
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
       window.removeEventListener('storage', storage);
+      window.removeEventListener('message', detailReady);
       window.removeEventListener('blur', blur);
     },
   };

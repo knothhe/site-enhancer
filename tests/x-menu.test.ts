@@ -72,11 +72,11 @@ test('injects only into the tweet More menu and handles rerender without duplica
   assert.equal(unrelated.querySelectorAll('.site-enhancer-menuitem').length, 0);
   unrelated.remove();
   const portal = await open(article);
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 4);
   assert.ok(portal.querySelector('.site-enhancer-menu-height'));
   portal.querySelector('[data-testid="Dropdown"]')!.appendChild(document.createElement('span'));
   await flush();
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 4);
 });
 
 test('does not duplicate actions when X wraps menu content after mounting', async () => {
@@ -93,8 +93,8 @@ test('does not duplicate actions when X wraps menu content after mounting', asyn
   dropdown.appendChild(portal.querySelector('[role="menuitem"]:not(.site-enhancer-menuitem)')!);
   portal.appendChild(dropdown);
   await flush();
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
-  assert.equal(dropdown.querySelectorAll('.site-enhancer-menuitem').length, 3);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 4);
+  assert.equal(dropdown.querySelectorAll('.site-enhancer-menuitem').length, 4);
 });
 
 test('copies the selected tweet snapshot even if its virtualized DOM is recycled', async () => {
@@ -198,7 +198,7 @@ test('adds actions when X opens the menu from a cancelled Enter or Space keydown
     const portal = menu();
     await flush();
     const items = portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem');
-    assert.equal(items.length, 3);
+    assert.equal(items.length, 4);
     items[2].click();
     await flush();
     portal.remove();
@@ -215,5 +215,12 @@ test('a keyboard click after keydown keeps the menu session', async () => {
   await flush();
   caret.dispatchEvent(new win.MouseEvent('click', { bubbles: true, detail: 0 }) as any);
   await flush();
-  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 3);
+  assert.equal(portal.querySelectorAll('.site-enhancer-menuitem').length, 4);
+});
+
+test('offers screenshot copying even for posts without text', async () => {
+  cleanup = installXCopyMenu();
+  const portal = await open(tweet(''));
+  const item = Array.from(portal.querySelectorAll('.site-enhancer-menuitem')).find(node => node.textContent === 'Copy post as image');
+  assert.ok(item);
 });

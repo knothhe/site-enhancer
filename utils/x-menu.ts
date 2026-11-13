@@ -1,3 +1,5 @@
+import { showScreenshotPreview } from './x-screenshot-preview.ts';
+import { renderPostScreenshot, screenshotPosts } from './x-screenshot.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { createToast } from './toast.ts';
 
@@ -7,6 +9,7 @@ const ITEM = 'site-enhancer-menuitem';
 const MENU = 'site-enhancer-menu';
 const HEIGHT = 'site-enhancer-menu-height';
 const icons = {
+  image: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v14h14V5H5zm1 12 4-5 3 3 2-2 3 4H6zm2-7a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   link: 'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z',
   text: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
 };
@@ -54,10 +57,10 @@ export function getTweetData(tweet: Element): { text: string; url: string } {
 export function installXCopyMenu(): () => void {
   const chinese = document.documentElement.lang.toLowerCase().startsWith('zh');
   const labels = chinese ? {
-    link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接', copied: '已复制',
+    image: '复制推文为截图', link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接', copied: '已复制',
     failed: '复制失败，请重试', empty: '这条推文没有可复制的文字', missing: '无法获取推文链接',
   } : {
-    link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link', copied: 'Copied!',
+    image: 'Copy post as image', link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link', copied: 'Copied!',
     failed: 'Copy failed. Please try again.', empty: 'This post has no text to copy.', missing: 'Post link unavailable.',
   };
   const toast = createToast();
@@ -77,6 +80,7 @@ export function installXCopyMenu(): () => void {
 
   type Session = {
     trigger: HTMLElement;
+    tweet: HTMLElement;
     data: ReturnType<typeof getTweetData>;
     existing: Set<Element>;
     menu?: HTMLElement;
@@ -86,6 +90,7 @@ export function installXCopyMenu(): () => void {
   };
   let session: Session | undefined;
   let disposed = false;
+  let closePreview: (() => void) | undefined;
 
   function reset() {
     observer.disconnect();
@@ -98,7 +103,7 @@ export function installXCopyMenu(): () => void {
     session = undefined;
   }
 
-  function createItem(kind: 'link' | 'text' | 'url', current: Session) {
+  function createItem(kind: 'link' | 'text' | 'url' | 'image', current: Session) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = ITEM;
@@ -110,6 +115,15 @@ export function installXCopyMenu(): () => void {
     button.addEventListener('click', async event => {
       event.preventDefault();
       event.stopPropagation();
+      if (kind === 'image') {
+        if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(labels.failed); return; }
+        const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
+        const png = renderPostScreenshot(posts);
+        current.trigger.click(); reset();
+        closePreview?.();
+        closePreview = showScreenshotPreview(document, png, current.trigger);
+        return;
+      }
       const { text, url } = current.data;
       if (kind === 'text' && !text) { toast.show(labels.empty); return; }
       if (kind !== 'text' && !url) { toast.show(labels.missing); return; }
@@ -153,7 +167,7 @@ export function installXCopyMenu(): () => void {
       }
     }
     const existingItems = Array.from(menu.querySelectorAll(`.${ITEM}`));
-    if (existingItems.length === 3 && existingItems.every(item => dropdown.contains(item))) return;
+    if (existingItems.length === 4 && existingItems.every(item => dropdown.contains(item))) return;
     // X can move native items into Dropdown after initially mounting the menu.
     existingItems.forEach(item => item.remove());
     const nativeItem = dropdown.querySelector<HTMLElement>('[role="menuitem"]');
@@ -162,8 +176,9 @@ export function installXCopyMenu(): () => void {
     const link = createItem('link', current);
     const text = createItem('text', current);
     const url = createItem('url', current);
-    link.style.color = text.style.color = url.style.color = color;
-    nativeItem.before(link, text, url);
+    const image = createItem('image', current);
+    link.style.color = text.style.color = url.style.color = image.style.color = color;
+    nativeItem.before(link, text, url, image);
   }
 
   const observer = new MutationObserver(syncMenu);
@@ -173,7 +188,7 @@ export function installXCopyMenu(): () => void {
     if (!tweet) { reset(); return; }
     reset();
     session = {
-      trigger, data: getTweetData(tweet), heights: [],
+      trigger, tweet: tweet as HTMLElement, data: getTweetData(tweet), heights: [],
       existing: new Set(document.querySelectorAll('[role="menu"]')),
     };
     // Observe only while opening/using a tweet menu, not while scrolling the feed.
@@ -228,6 +243,7 @@ export function installXCopyMenu(): () => void {
   window.addEventListener('resize', syncMenu);
   return () => {
     disposed = true;
+    closePreview?.();
     reset();
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKeyDown, true);
