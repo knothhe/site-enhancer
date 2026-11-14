@@ -57,6 +57,8 @@ The extension adds four copy actions to the native **More (⋯)** menu on each t
 
 In the three-column image viewer, choose **Copy image** in the toolbar or press **C** to copy the current original image as a full-resolution PNG. Zoom and pan do not crop the copied image. Copying is disabled while switching images; success and failure messages appear below the image, and failed copies can be retried.
 
+In three-column mode, videos keep X's native player and controls. Choose **Expand video** to watch in a viewport-sized overlay, including from the detail pane; **Close video** or Escape returns to the inline player. Expansion keeps the same video stream and playback position. Opening details pauses timeline videos and blocks their autoplay while the detail pane is open; closing details does not automatically resume them. An explicitly expanded timeline video can still be played, and is paused again when collapsed if details remain open. Hidden cached details also cannot autoplay. Detail frames allow native fullscreen and picture-in-picture where supported by the browser and player.
+
 **Copy post link** copies only the canonical post URL, without text or tracking parameters. These actions are also available inside the three-column detail pane. Quote cards in the timeline and detail pane open the quoted post in the detail pane and participate in back/forward history.
 
 Menu labels follow the page language (Chinese or English) and colors follow the native menu. Media-only posts can be copied with their link. For long posts, expand **Show more** before copying; the extension copies the currently rendered text.

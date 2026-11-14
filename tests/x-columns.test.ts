@@ -79,6 +79,128 @@ test('interactive controls, profiles, media and modified clicks keep native beha
   }
   assert.equal(document.querySelector('iframe'), null);
 });
+
+function addVideo(doc = document) {
+  const player = doc.createElement('div');
+  player.dataset.testid = 'videoPlayer';
+  player.innerHTML = '<div data-testid="videoComponent"><video></video><div data-video-overlay></div><div role="slider"><span data-video-progress></span></div></div>';
+  doc.querySelector('article')!.append(player);
+  const video = player.querySelector('video')!;
+  let paused = false;
+  let pauses = 0;
+  Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+  video.pause = () => { paused = true; pauses++; };
+  const play = () => { paused = false; video.dispatchEvent(new win.Event('play') as unknown as Event); };
+  // happy-dom does not implement the browser top layer. Browser verification
+  // covers rendering; this shim exercises ownership, cleanup and focus state.
+  let popover = false;
+  player.showPopover = () => { popover = true; };
+  player.hidePopover = () => { popover = false; };
+  const matches = player.matches.bind(player);
+  player.matches = selector => selector === ':popover-open' ? popover : matches(selector);
+  return { player, video, play, pauses: () => pauses };
+}
+
+test('native video overlays and progress controls never navigate to post details', () => {
+  addVideo(); start();
+  for (const selector of ['video', '[data-video-overlay]', '[data-video-progress]']) {
+    assert.equal(click(selector).defaultPrevented, false);
+  }
+  assert.equal(document.querySelector('iframe'), null);
+});
+
+test('opening details pauses feed videos and blocks later autoplay until details close', () => {
+  const { video, play, pauses } = addVideo();
+  start();
+  assert.equal(video.paused, false);
+  selectDetail(123);
+  assert.equal(video.paused, true);
+  assert.equal(pauses(), 1);
+  play();
+  assert.equal(video.paused, true);
+  const later = addVideo(); later.play();
+  assert.equal(later.video.paused, true);
+  const frame = document.querySelector('iframe')!;
+  assert.equal(frame.allowFullscreen, true);
+  assert.match(frame.allow, /picture-in-picture/);
+  click('.se-column-toolbar button[aria-label="关闭"]');
+  assert.equal(video.paused, true, 'closing details must not resume playback automatically');
+  play(); assert.equal(video.paused, false);
+  selectDetail(456);
+  columns!.setEnabled(false);
+  play(); assert.equal(video.paused, false, 'disabling columns removes the autoplay guard');
+});
+
+test('video expansion keeps the original node and source, then restores focus and page interaction', () => {
+  const { player, video } = addVideo();
+  video.src = 'blob:https://x.com/existing-stream';
+  video.currentTime = 42;
+  start();
+  const button = player.querySelector<HTMLButtonElement>('button')!;
+  const parent = player.parentElement;
+  button.focus();
+  click('[data-site-enhancer-video-expand]');
+  assert.equal(player.parentElement, parent);
+  assert.equal(player.querySelector('video'), video);
+  assert.equal(video.currentTime, 42);
+  assert.equal(video.src, 'blob:https://x.com/existing-stream');
+  assert.equal(video.paused, false);
+  assert.equal(player.getAttribute('role'), 'dialog');
+  assert.equal(button.getAttribute('aria-expanded'), 'true');
+  assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, true);
+  button.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event);
+  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
+  assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
+  assert.equal(document.activeElement, button);
+  click('[data-site-enhancer-video-expand]');
+  columns!.setEnabled(false);
+  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(player.querySelector('button'), null);
+});
+
+test('detail video expands its own frame and cached hidden details cannot autoplay', t => {
+  start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const { player, video, play } = addVideo(detail.document as unknown as Document);
+  signalDetail(detail);
+  player.querySelector('button')!.dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
+  assert.equal(frame.hasAttribute('data-site-enhancer-video-frame'), true);
+  assert.equal(player.querySelector('video'), video);
+  selectDetail(456);
+  assert.equal(frame.hasAttribute('data-site-enhancer-video-frame'), false);
+  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(video.paused, true);
+  play(); assert.equal(video.paused, true);
+  selectDetail(123);
+  play(); assert.equal(video.paused, false);
+});
+
+test('an explicitly expanded feed video can play alone and pauses again when collapsed over details', t => {
+  const feed = addVideo(); start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const other = addVideo(detail.document as unknown as Document);
+  signalDetail(detail);
+  click('[data-site-enhancer-video-expand]');
+  assert.equal(other.video.paused, true);
+  feed.play(); assert.equal(feed.video.paused, false);
+  other.play(); assert.equal(other.video.paused, true);
+  click('[data-site-enhancer-video-expand]');
+  assert.equal(feed.video.paused, true);
+  other.play(); assert.equal(other.video.paused, false);
+});
+
+test('removing a virtualized expanded player releases background interaction', async () => {
+  const { player } = addVideo(); start();
+  click('[data-site-enhancer-video-expand]');
+  player.remove();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
+  assert.equal(document.querySelector('[data-site-enhancer-video-expand]'), null);
+});
 test('keyboard resizing persists preferences, reset restores defaults, and disable removes listeners/UI', () => {
   const controller = start();
   const divider = document.querySelector('.se-column-divider')!;

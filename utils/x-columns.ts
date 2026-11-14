@@ -1,5 +1,6 @@
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
 import { installXImageViewer } from './x-image-viewer.ts';
+import { installXVideoViewer } from './x-video-viewer.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
 import { resolveLocale, type Locale } from './i18n.ts';
@@ -94,6 +95,8 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 #site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
+#site-enhancer-columns:has(iframe[data-site-enhancer-video-frame]){z-index:2147483646}
+#site-enhancer-columns iframe[data-site-enhancer-video-frame]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
 #site-enhancer-columns [hidden]{display:none!important}
 /* Retain the cached browsing viewport: display:none resets inner layout and scroll in Chromium. */
@@ -147,6 +150,7 @@ export function installXColumns(options: {
 } = {}) {
   const root = document.documentElement;
   const imageViewer = installXImageViewer();
+  const videoViewer = installXVideoViewer();
   let collapsed = false;
   let navToggle: HTMLButtonElement | undefined;
   try { collapsed = localStorage.getItem(COLUMNS_COLLAPSED_KEY) === 'true'; } catch { /* Optional preference. */ }
@@ -236,7 +240,8 @@ export function installXColumns(options: {
     loadingFrame = undefined; checkFrame = undefined;
   }
   function discardFrame(target: HTMLIFrameElement) {
-    frameDocuments.get(target)?.removeEventListener('click', click, true);
+    const doc = frameDocuments.get(target);
+    if (doc) { doc.removeEventListener('click', click, true); videoViewer.detach(doc); }
     frameDocuments.delete(target);
     for (const [url, entry] of readyFrames) if (entry.frame === target) readyFrames.delete(url);
     target.remove();
@@ -253,6 +258,7 @@ export function installXColumns(options: {
     } catch { return false; }
   }
   function parkFrame() {
+    videoViewer.close();
     stopFrameWatch();
     if (!frame) return;
     const entry = selected && readyFrames.get(selected);
@@ -274,6 +280,7 @@ export function installXColumns(options: {
     clearFrames();
     frame = undefined;
     selected = undefined;
+    videoViewer.setFeedPaused(false);
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = undefined;
     openLink.hidden = true;
@@ -291,6 +298,7 @@ export function installXColumns(options: {
     parkFrame();
     frame = undefined;
     selected = url;
+    videoViewer.setFeedPaused(true);
     openLink.href = url;
     openLink.hidden = false;
     retry.hidden = true;
@@ -309,6 +317,8 @@ export function installXColumns(options: {
     const current = document.createElement('iframe');
     current.name = DETAIL_FRAME_NAME;
     current.title = t.frameTitle;
+    current.allow = 'fullscreen; picture-in-picture';
+    current.allowFullscreen = true;
     // Keep native popups, media and forms, but prevent a child route from replacing the timeline.
     current.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
     if (options.prepareDetail) {
@@ -343,6 +353,7 @@ export function installXColumns(options: {
             (Date.now() - started > 1500 && !primary.querySelector('[role="progressbar"]') && (primary.textContent?.length ?? 0) > 50))) {
             doc.addEventListener('click', click, true);
             frameDocuments.set(current, doc);
+            videoViewer.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
             while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
             current.style.visibility = '';
@@ -417,6 +428,7 @@ export function installXColumns(options: {
   }
   function mount() {
     if (panel || !document.body) return;
+    videoViewer.attach(document);
     panel = document.createElement('aside');
     panel.id = 'site-enhancer-columns';
     const current = panel;
@@ -553,6 +565,7 @@ export function installXColumns(options: {
   function blur() { end(); }
   function unmount() {
     imageViewer.close();
+    videoViewer.remove();
     navToggle?.remove();
     navToggle = undefined;
     if (frame || selected) options.releaseDetail?.();
@@ -587,7 +600,7 @@ export function installXColumns(options: {
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (!target?.closest('[data-testid="primaryColumn"]') || !target.closest('article[data-testid="tweet"]')) return;
     if (imageViewer.handleClick(event)) return;
-    if (target.closest('button,[role="button"],input,textarea,select,video,[contenteditable="true"]')) return;
+    if (target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoPlayer"],[data-testid="videoComponent"],[contenteditable="true"]')) return;
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;
     const link = target.closest<HTMLAnchorElement>('a[href]');
     const article = target.closest('article')!;
