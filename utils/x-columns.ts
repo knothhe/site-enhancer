@@ -50,6 +50,10 @@ main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),
 html{scrollbar-width:thin;scrollbar-color:#8885 transparent}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
+const PRIMARY_COLUMN = '[data-testid="primaryColumn"]';
+const HEADER_CONTROL = '[role="tablist"], [data-testid="app-bar-back"]';
+const HEADER_TARGET = `${PRIMARY_COLUMN}, ${HEADER_CONTROL}`;
+const TIMELINE_CELL = '[data-testid="cellInnerDiv"], article[data-testid="tweet"]';
 export const COLUMNS_CSS = `
 ${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:#8885 transparent}
 ${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:var(--se-column-line)!important}
@@ -190,13 +194,16 @@ export function installXColumns(options: {
   let selected: string | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
   let widths = { ...DEFAULT_COLUMNS };
+  let renderedWidth: number | undefined;
   let drag: { kind: number; x: number; widths: ColumnWidths } | undefined;
   let returnFocus: HTMLElement | undefined;
   let selectedArticle: Element | undefined;
   let bodyObserver: MutationObserver | undefined;
   let headerObserver: MutationObserver | undefined;
+  let headerFrame: number | undefined;
   let sizeObserver: ResizeObserver | undefined;
   let measuredHeader: Element | undefined;
+  let unmeasuredHeaderElements: Element[] = [];
   let backButton: HTMLButtonElement;
   let forwardButton: HTMLButtonElement;
   const history = installDetailHistory(url => {
@@ -461,13 +468,29 @@ export function installXColumns(options: {
     localized(renderToggle);
     navToggle.addEventListener('click', () => { end(); collapsed = !collapsed; saveCollapsed(); renderWidths(); });
     document.body.append(navToggle);
-    bodyObserver = new MutationObserver(renderWidths);
+    bodyObserver = new MutationObserver(renderTheme);
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
-    sizeObserver = new window.ResizeObserver(() => { syncHeader(); renderWidths(); });
+    bodyObserver.observe(root, { attributes: true, attributeFilter: ['data-site-enhancer-x-theme', 'data-site-enhancer-x-tone'] });
+    renderTheme();
+    let observedWidth: number | undefined;
+    sizeObserver = new window.ResizeObserver(entries => {
+      for (const entry of entries) {
+        if (entry.target === root && entry.contentRect.width !== observedWidth) {
+          observedWidth = entry.contentRect.width;
+          refresh();
+        } else if (entry.target === measuredHeader) {
+          setHeaderHeight(entry.borderBoxSize?.[0]?.blockSize ?? measuredHeader.getBoundingClientRect().height);
+        }
+      }
+    });
     sizeObserver.observe(root);
-    headerObserver = new MutationObserver(() => { if (!measuredHeader?.isConnected) syncHeader(); });
-    headerObserver.observe(document.body, { childList: true, subtree: true });
-    syncHeader();
+    headerObserver = new MutationObserver(records => {
+      if (measuredHeader?.isConnected || headerFrame !== undefined) return;
+      const removedHeader = (measuredHeader ?? unmeasuredHeaderElements[0])?.isConnected === false;
+      if (!removedHeader && !records.some(changesHeader)) return;
+      headerFrame = window.requestAnimationFrame(() => { headerFrame = undefined; syncHeader(); });
+    });
+    headerObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['role', 'data-testid'] });
     dividers = [0, 1].map(kind => {
       const divider = document.createElement('div');
       divider.className = 'se-column-divider';
@@ -498,31 +521,55 @@ export function installXColumns(options: {
     });
     if (!history.restore()) closeDetail(false);
   }
+  function changesHeader(record: MutationRecord) {
+    const target = record.target as Element;
+    if (target.closest(TIMELINE_CELL)) return false;
+    if (unmeasuredHeaderElements.includes(target)) return true;
+    if (record.type === 'attributes') return target.matches(HEADER_TARGET);
+    if (target.closest(HEADER_CONTROL)) return true;
+    return Array.from(record.addedNodes).some(node => {
+      if (node.nodeType !== 1) return false;
+      const element = node as Element;
+      return !element.matches(TIMELINE_CELL) && (element.matches(HEADER_TARGET) ||
+        (!!element.firstElementChild && !!element.querySelector(HEADER_TARGET)));
+    });
+  }
+  function setHeaderHeight(height = 54) {
+    const value = `${height >= 32 && height <= 120 ? height : 54}px`;
+    if (root.style.getPropertyValue('--se-column-header-height') !== value) {
+      root.style.setProperty('--se-column-header-height', value);
+    }
+  }
   function syncHeader() {
     if (!panel) return;
-    if (!measuredHeader?.isConnected) {
-      const primary = document.querySelector('[data-testid="primaryColumn"]');
-      let candidate = primary?.querySelector('[role="tablist"], [data-testid="app-bar-back"]');
-      if (measuredHeader) sizeObserver?.unobserve(measuredHeader);
-      measuredHeader?.removeAttribute('data-site-enhancer-column-header');
-      measuredHeader = undefined;
-      while (candidate && candidate !== primary) {
-        const rect = candidate.getBoundingClientRect();
-        if (rect.height >= 32 && rect.height <= 120 && Math.abs(rect.top) < 2 && parseFloat(getComputedStyle(candidate).borderBottomWidth) > 0) {
-          measuredHeader = candidate;
-          measuredHeader.setAttribute('data-site-enhancer-column-header', '');
-          sizeObserver?.observe(measuredHeader);
-          break;
-        }
-        candidate = candidate.parentElement;
+    if (measuredHeader?.isConnected) return setHeaderHeight(measuredHeader.getBoundingClientRect().height);
+    if (measuredHeader) sizeObserver?.unobserve(measuredHeader);
+    measuredHeader?.removeAttribute('data-site-enhancer-column-header');
+    measuredHeader = undefined;
+    const primary = document.querySelector(PRIMARY_COLUMN);
+    let candidate = primary?.querySelector(HEADER_CONTROL);
+    let height: number | undefined;
+    const unmeasured: Element[] = [];
+    while (candidate && candidate !== primary) {
+      const rect = candidate.getBoundingClientRect();
+      if (rect.height >= 32 && rect.height <= 120 && Math.abs(rect.top) < 2 && parseFloat(getComputedStyle(candidate).borderBottomWidth) > 0) {
+        measuredHeader = candidate;
+        height = rect.height;
+        measuredHeader.setAttribute('data-site-enhancer-column-header', '');
+        sizeObserver?.observe(measuredHeader, { box: 'border-box' });
+        break;
       }
+      unmeasured.push(candidate);
+      candidate = candidate.parentElement;
     }
-    const height = measuredHeader?.getBoundingClientRect().height;
-    root.style.setProperty('--se-column-header-height', `${height && height >= 32 && height <= 120 ? height : 54}px`);
+    unmeasuredHeaderElements = measuredHeader ? [] : unmeasured;
+    setHeaderHeight(height);
   }
-  function renderWidths() {
+  function renderWidths(width?: number) {
     if (!panel) return;
-    const { nav, feed, detail } = columnGeometry(viewportWidth(), collapsed ? { ...widths, nav: 88 } : widths);
+    width ??= viewportWidth();
+    renderedWidth = width;
+    const { nav, feed, detail } = columnGeometry(width, collapsed ? { ...widths, nav: 88 } : widths);
     root.style.setProperty('--se-nav', `${nav}px`);
     root.style.setProperty('--se-feed', `${feed}px`);
     root.style.setProperty('--se-detail', `${detail}px`);
@@ -533,8 +580,11 @@ export function installXColumns(options: {
       divider.style.left = `${index === 0 ? nav : nav + feed}px`;
       divider.setAttribute('aria-valuenow', String(index === 0 ? nav : feed));
       divider.setAttribute('aria-valuemin', index === 0 ? '88' : '360');
-      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : viewportWidth() - nav - 360));
+      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : width - nav - 360));
     });
+  }
+  function renderTheme() {
+    if (!panel) return;
     const background = getComputedStyle(document.body).backgroundColor;
     const channels = background.match(/[\d.]+/g)?.slice(0, 3).map(Number);
     const dark = channels && channels.reduce((sum, value) => sum + value, 0) < 384 && background !== 'rgba(0, 0, 0, 0)';
@@ -545,10 +595,11 @@ export function installXColumns(options: {
     navToggle?.style.setProperty('color', `var(--se-x-text,${dark ? '#e7e9ea' : '#536471'})`);
   }
   function adjust(kind: number, delta: number) {
-    const { nav, feed } = columnGeometry(viewportWidth(), collapsed ? { ...widths, nav: 88 } : widths);
+    const width = viewportWidth();
+    const { nav, feed } = columnGeometry(width, collapsed ? { ...widths, nav: 88 } : widths);
     if (kind === 0) { collapsed = false; widths.nav = Math.max(88, Math.min(280, nav + delta)); }
-    else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(viewportWidth() - nav - 360, feed + delta)) / (viewportWidth() - nav)));
-    renderWidths();
+    else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(width - nav - 360, feed + delta)) / (width - nav)));
+    renderWidths(width);
   }
   function move(event: PointerEvent) {
     if (!drag) return;
@@ -574,13 +625,17 @@ export function installXColumns(options: {
     drag = undefined;
     bodyObserver?.disconnect();
     headerObserver?.disconnect();
+    if (headerFrame !== undefined) window.cancelAnimationFrame(headerFrame);
+    headerFrame = undefined;
     sizeObserver?.disconnect();
     measuredHeader?.removeAttribute('data-site-enhancer-column-header');
     measuredHeader = undefined;
+    unmeasuredHeaderElements = [];
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = undefined;
     panel?.remove();
     panel = undefined;
+    renderedWidth = undefined;
     frame = undefined;
     dividers.forEach(divider => divider.remove());
     dividers = [];
@@ -591,14 +646,18 @@ export function installXColumns(options: {
   }
   function refresh() {
     if (disposed) return;
-    if (!active()) return unmount();
+    const width = enabled ? viewportWidth() : 0;
+    if (width < COLUMNS_MIN_WIDTH) return unmount();
     mount();
-    if (panel) { root.setAttribute('data-site-enhancer-columns', ''); renderWidths(); }
+    if (!panel) return;
+    root.toggleAttribute('data-site-enhancer-columns', true);
+    if (width !== renderedWidth) renderWidths(width);
+    if (!measuredHeader?.isConnected) syncHeader();
   }
   function click(event: MouseEvent) {
-    if (!active() || !panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (!panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
-    if (!target?.closest('[data-testid="primaryColumn"]') || !target.closest('article[data-testid="tweet"]')) return;
+    if (!target?.closest(PRIMARY_COLUMN) || !target.closest('article[data-testid="tweet"]') || !active()) return;
     if (imageViewer.handleClick(event)) return;
     if (target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoPlayer"],[data-testid="videoComponent"],[contenteditable="true"]')) return;
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;

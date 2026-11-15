@@ -109,7 +109,7 @@ test('native video overlays and progress controls never navigate to post details
   assert.equal(document.querySelector('iframe'), null);
 });
 
-test('opening details pauses feed videos and blocks later autoplay until details close', () => {
+test('opening details pauses feed videos and blocks later autoplay until details close', async () => {
   const { video, play, pauses } = addVideo();
   start();
   assert.equal(video.paused, false);
@@ -120,6 +120,10 @@ test('opening details pauses feed videos and blocks later autoplay until details
   assert.equal(video.paused, true);
   const later = addVideo(); later.play();
   assert.equal(later.video.paused, true);
+  const insertedWhilePlaying = addVideo();
+  assert.equal(insertedWhilePlaying.video.paused, false);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(insertedWhilePlaying.video.paused, true);
   const frame = document.querySelector('iframe')!;
   assert.equal(frame.allowFullscreen, true);
   assert.match(frame.allow, /picture-in-picture/);
@@ -201,6 +205,59 @@ test('removing a virtualized expanded player releases background interaction', a
   assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
   assert.equal(document.querySelector('[data-site-enhancer-video-expand]'), null);
 });
+
+test('timeline mutations update changed video players without rescanning existing ones', async t => {
+  const existing = addVideo();
+  start();
+  const documentQueries = t.mock.method(document, 'querySelectorAll');
+  const existingQueries = t.mock.method(existing.player, 'querySelector');
+  existing.player.querySelector('[data-video-progress]')!.replaceChildren(document.createElement('span'));
+  const added = addVideo();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const button = added.player.querySelector('[data-site-enhancer-video-expand]')!;
+  assert.ok(button);
+  assert.equal(existingQueries.mock.calls.filter(call => call.arguments[0] === 'video').length, 0);
+  assert.equal(documentQueries.mock.calls.filter(call => String(call.arguments[0]).includes('video')).length, 0);
+
+  button.remove();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(added.player.querySelector('[data-site-enhancer-video-expand]'), button);
+  const media = added.video.parentElement!;
+  media.remove();
+  media.replaceChildren();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(added.player.querySelector('[data-site-enhancer-video-expand]'), null);
+});
+
+test('video controls follow test IDs assigned after the video mounts', async () => {
+  const primary = document.querySelector('[data-testid="primaryColumn"]')!;
+  const { player } = addVideo();
+  player.removeAttribute('data-testid');
+  start();
+  const button = () => player.querySelector('[data-site-enhancer-video-expand]');
+  assert.equal(button(), null);
+
+  player.dataset.testid = 'videoPlayer';
+  player.append(document.createElement('span'));
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(button());
+
+  player.removeAttribute('data-testid');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(button(), null);
+
+  primary.removeAttribute('data-testid');
+  player.dataset.testid = 'videoPlayer';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(button(), null);
+  primary.setAttribute('data-testid', 'primaryColumn');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(button());
+  primary.removeAttribute('data-testid');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(button(), null);
+});
+
 test('keyboard resizing persists preferences, reset restores defaults, and disable removes listeners/UI', () => {
   const controller = start();
   const divider = document.querySelector('.se-column-divider')!;
@@ -296,6 +353,45 @@ test('detail toolbar follows the measured native header and releases its alignme
   controller.setEnabled(false);
   assert.equal(header.hasAttribute('data-site-enhancer-column-header'), false);
   assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '');
+});
+
+test('loading and updating the timeline does not rediscover the header until it appears', async t => {
+  const primary = document.querySelector('[data-testid="primaryColumn"]')!;
+  const querySelector = document.querySelector.bind(document);
+  const search = t.mock.method(document, 'querySelector', querySelector);
+  start();
+  await win.happyDOM.waitUntilComplete();
+  const headerSearches = () => search.mock.calls.filter(call => call.arguments[0] === '[data-testid="primaryColumn"]').length;
+  const initialSearches = headerSearches();
+
+  for (let i = 0; i < 3; i++) {
+    primary.insertAdjacentHTML('beforeend', '<div data-testid="cellInnerDiv"><article data-testid="tweet">New post</article></div>');
+    document.body.append(document.createElement('div'));
+    await win.happyDOM.waitUntilComplete();
+  }
+  assert.equal(headerSearches(), initialSearches);
+
+  const header = document.createElement('div');
+  header.style.borderBottom = '1px solid black';
+  let height = 0;
+  header.getBoundingClientRect = () => ({ top: 0, height } as DOMRect);
+  const tabs = header.appendChild(document.createElement('div'));
+  primary.prepend(header);
+  await win.happyDOM.waitUntilComplete();
+  tabs.setAttribute('role', 'tablist');
+  await win.happyDOM.waitUntilComplete();
+  assert.equal(headerSearches(), initialSearches + 1);
+  assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '54px');
+
+  height = 72;
+  header.append(document.createElement('button'));
+  await win.happyDOM.waitUntilComplete();
+  assert.equal(headerSearches(), initialSearches + 2);
+  assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '72px');
+
+  header.remove();
+  await win.happyDOM.waitUntilComplete();
+  assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '54px');
 });
 
 
@@ -815,9 +911,12 @@ test('only the current same-origin detail signal bypasses the readiness poll', t
 test('detail notifier fires as content renders, fires once and stops after disposal', async t => {
   const detail = new Window({ url: 'https://x.com/alice/status/123' });
   t.after(() => detail.happyDOM.close());
+  const primary = detail.document.createElement('section');
+  primary.setAttribute('data-testid', 'primaryColumn');
+  detail.document.body.append(primary);
   let calls = 0;
   const stop = observeDetailReady(detail.document as unknown as Document, () => { calls++; });
-  detail.document.body.innerHTML = '<div data-testid="primaryColumn"><article data-testid="tweet"></article></div>';
+  primary.innerHTML = '<div><article data-testid="tweet"></article></div>';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(calls, 1);
   detail.document.querySelector('article')!.textContent = 'Updated';
@@ -829,6 +928,34 @@ test('detail notifier fires as content renders, fires once and stops after dispo
   detail.document.body.innerHTML = '<div data-testid="primaryColumn"><article data-testid="tweet"></article></div>';
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(calls, 1);
+});
+
+test('detail notifier ignores unrelated mutations and detects late test IDs', async t => {
+  const detail = new Window({ url: 'https://x.com/alice/status/123' });
+  t.after(() => detail.happyDOM.close());
+  const primary = detail.document.createElement('section');
+  const post = detail.document.createElement('article');
+  const sidebar = detail.document.createElement('aside');
+  primary.append(post);
+  detail.document.body.append(primary, sidebar);
+  const queries = t.mock.method(detail.document, 'querySelector');
+  let calls = 0;
+  const doc = detail.document as unknown as Document;
+  observeDetailReady(doc, () => { calls++; });
+  const initialQueries = queries.mock.callCount();
+
+  sidebar.setAttribute('data-testid', 'sidebarColumn');
+  sidebar.append(detail.document.createElement('div'));
+  post.setAttribute('data-testid', 'tweet');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 0);
+  assert.equal(queries.mock.callCount(), initialQueries, 'mutations should not rescan the document');
+
+  primary.setAttribute('data-testid', 'primaryColumn');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  observeDetailReady(doc, () => { calls++; });
+  assert.equal(calls, 2, 'an already-rendered post is ready immediately');
 });
 
 test('recent details reuse connected documents and drafts, pause hidden video and stay bounded', async t => {

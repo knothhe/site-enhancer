@@ -1,6 +1,10 @@
 import { resolveLocale } from './i18n.ts';
 
-const PLAYER = '[data-testid="videoPlayer"]';
+const PRIMARY_TEST_ID = 'primaryColumn';
+const PLAYER_TEST_ID = 'videoPlayer';
+const PLAYER = `[data-testid="${PLAYER_TEST_ID}"]`;
+const POST_PLAYER = `[data-testid="${PRIMARY_TEST_ID}"] article ${PLAYER}`;
+const MEDIA = `${PLAYER},video`;
 const EXPANDED = 'data-site-enhancer-video-expanded';
 const FRAME = 'data-site-enhancer-video-frame';
 const BUTTON = 'data-site-enhancer-video-expand';
@@ -112,37 +116,83 @@ export function installXVideoViewer() {
     style.id = 'site-enhancer-video-style';
     style.textContent = CSS;
     (doc.head ?? doc.documentElement).append(style);
-    const buttons = new Map<HTMLElement, HTMLButtonElement>();
-    function scan() {
+    const players = new Map<HTMLElement, { button: HTMLButtonElement; video: HTMLVideoElement }>();
+    function syncPlayer(player: HTMLElement) {
+      const existing = players.get(player);
+      const video = player.isConnected && player.ownerDocument === doc && player.matches(POST_PLAYER)
+        ? player.querySelector<HTMLVideoElement>('video')
+        : null;
+      if (!video) {
+        if (expanded?.player === player) close();
+        players.delete(player);
+        existing?.button.remove();
+        return;
+      }
+      if (existing) {
+        existing.video = video;
+        if (!player.contains(existing.button)) player.append(existing.button);
+        return;
+      }
+      if (typeof player.showPopover !== 'function') return;
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.setAttribute(BUTTON, '');
+      button.setAttribute('aria-expanded', 'false');
+      button.setAttribute('aria-haspopup', 'dialog');
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span></span>';
+      button.querySelector('span')!.textContent = labels().expand;
+      players.set(player, { button, video });
+      player.append(button);
+    }
+    function syncChanges(records: MutationRecord[]) {
       if (expanded?.player.ownerDocument === doc && !expanded.player.isConnected) close();
-      for (const [player, button] of buttons) {
-        if (!player.isConnected || !player.querySelector('video')) {
-          if (expanded?.player === player) close();
-          button.remove(); buttons.delete(player);
+      const changed = new Set<HTMLElement>();
+      const pauseAdded = blocked(doc);
+      let elementsRemoved = false;
+      function collectMedia(element: HTMLElement) {
+        if (element.matches(PLAYER)) changed.add(element);
+        if (element.tagName !== 'VIDEO') return;
+        const player = element.closest<HTMLElement>(PLAYER);
+        if (player) changed.add(player);
+        const video = element as HTMLVideoElement;
+        // A video may have started before its play event could reach this document.
+        if (pauseAdded && doc.contains(video) && !video.paused && !expanded?.player.contains(video)) video.pause();
+      }
+      for (const { type, target, oldValue, addedNodes, removedNodes } of records) {
+        if (type === 'attributes') {
+          const element = target as HTMLElement;
+          const testId = element.getAttribute('data-testid');
+          if (testId === PLAYER_TEST_ID || players.has(element)) changed.add(element);
+          if (testId === PRIMARY_TEST_ID || oldValue === PRIMARY_TEST_ID) {
+            element.querySelectorAll<HTMLElement>(PLAYER).forEach(player => changed.add(player));
+          }
+          continue;
+        }
+        if (!elementsRemoved && removedNodes.length) {
+          elementsRemoved = Array.from(removedNodes).some(node => node.nodeType === 1);
+        }
+        for (const node of addedNodes) {
+          if (node.nodeType !== 1) continue;
+          const element = node as HTMLElement;
+          if (element.hasAttribute(BUTTON)) continue;
+          if (element.matches(MEDIA)) collectMedia(element);
+          if (element.firstElementChild) element.querySelectorAll<HTMLElement>(MEDIA).forEach(collectMedia);
         }
       }
-      for (const player of doc.querySelectorAll<HTMLElement>(`[data-testid="primaryColumn"] article ${PLAYER}`)) {
-        if (!player.querySelector('video') || typeof player.showPopover !== 'function') continue;
-        const existing = buttons.get(player);
-        if (existing) { if (!player.contains(existing)) player.append(existing); continue; }
-        const button = doc.createElement('button');
-        button.type = 'button';
-        button.setAttribute(BUTTON, '');
-        button.setAttribute('aria-expanded', 'false');
-        button.setAttribute('aria-haspopup', 'dialog');
-        button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span></span>';
-        button.querySelector('span')!.textContent = labels().expand;
-        buttons.set(player, button);
-        player.append(button);
+      if (elementsRemoved) {
+        // Detached subtrees can be emptied before the observer sees the removal.
+        for (const [player, { button, video }] of players) {
+          if (!doc.contains(player) || !player.contains(button) || !player.contains(video)) changed.add(player);
+        }
       }
-      if (blocked(doc)) pauseVideos(doc);
+      changed.forEach(syncPlayer);
     }
     function click(event: MouseEvent) {
       const target = event.target as Element | null;
       const button = target?.closest?.<HTMLButtonElement>(`[${BUTTON}]`);
       if (!button || event.button !== 0) return;
       const player = button.closest<HTMLElement>(PLAYER);
-      if (!player || buttons.get(player) !== button) return;
+      if (!player || players.get(player)?.button !== button) return;
       event.preventDefault(); event.stopImmediatePropagation();
       if (expanded?.player === player) close(); else open(player, button, frame);
     }
@@ -150,19 +200,22 @@ export function installXVideoViewer() {
       const video = event.target as HTMLVideoElement;
       if (video.tagName === 'VIDEO' && (blocked(doc) || expanded) && !expanded?.player.contains(video)) video.pause();
     }
-    const observer = new MutationObserver(scan);
+    const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {
       if (expanded?.player.ownerDocument === doc) close();
       observer.disconnect();
       doc.removeEventListener('click', click, true);
       doc.removeEventListener('play', play, true);
-      buttons.forEach(button => button.remove());
+      players.forEach(({ button }) => button.remove());
       style.remove();
     } });
-    observer.observe(doc.documentElement, { childList: true, subtree: true });
+    observer.observe(doc.documentElement, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['data-testid'], attributeOldValue: true,
+    });
     doc.addEventListener('click', click, true);
     doc.addEventListener('play', play, true);
-    scan();
+    doc.querySelectorAll<HTMLElement>(POST_PLAYER).forEach(syncPlayer);
+    if (blocked(doc)) pauseVideos(doc);
   }
   return {
     attach,
