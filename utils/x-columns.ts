@@ -248,7 +248,12 @@ export function installXColumns(options: {
   }
   function discardFrame(target: HTMLIFrameElement) {
     const doc = frameDocuments.get(target);
-    if (doc) { doc.removeEventListener('click', click, true); videoViewer.detach(doc); }
+    if (doc) {
+      doc.removeEventListener('click', click, true);
+      doc.removeEventListener('keydown', openFocused, true);
+      doc.removeEventListener('keydown', closeOnEscape);
+      videoViewer.detach(doc);
+    }
     frameDocuments.delete(target);
     for (const [url, entry] of readyFrames) if (entry.frame === target) readyFrames.delete(url);
     target.remove();
@@ -359,6 +364,8 @@ export function installXColumns(options: {
           if (primary && (primary.querySelector('[data-testid="tweet"]') ||
             (Date.now() - started > 1500 && !primary.querySelector('[role="progressbar"]') && (primary.textContent?.length ?? 0) > 50))) {
             doc.addEventListener('click', click, true);
+            doc.addEventListener('keydown', openFocused, true);
+            doc.addEventListener('keydown', closeOnEscape);
             frameDocuments.set(current, doc);
             videoViewer.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
@@ -485,6 +492,7 @@ export function installXColumns(options: {
     });
     sizeObserver.observe(root);
     headerObserver = new MutationObserver(records => {
+      remarkSelection(records);
       if (measuredHeader?.isConnected || headerFrame !== undefined) return;
       const removedHeader = (measuredHeader ?? unmeasuredHeaderElements[0])?.isConnected === false;
       if (!removedHeader && !records.some(changesHeader)) return;
@@ -520,6 +528,21 @@ export function installXColumns(options: {
       return divider;
     });
     if (!history.restore()) closeDetail(false);
+  }
+  /** X virtualizes timeline cells; mark the selected post again when its article is re-rendered. */
+  function remarkSelection(records: MutationRecord[]) {
+    if (!selected || selectedArticle?.isConnected) return;
+    for (const record of records) for (const node of record.addedNodes) {
+      if (node.nodeType !== 1) continue;
+      const element = node as Element;
+      const articles = element.matches('article[data-testid="tweet"]') ? [element] : element.querySelectorAll('article[data-testid="tweet"]');
+      for (const article of articles) {
+        if (!article.closest(PRIMARY_COLUMN) || detailUrl(postPermalink(article) ?? '', location.origin) !== selected) continue;
+        selectedArticle = article;
+        article.setAttribute('data-site-enhancer-selected', '');
+        return;
+      }
+    }
   }
   function changesHeader(record: MutationRecord) {
     const target = record.target as Element;
@@ -678,12 +701,45 @@ export function installXColumns(options: {
     selectedArticle.setAttribute('data-site-enhancer-selected', '');
     history.select(url);
   }
+  /** Enter on a focused post (X's j/k focus) opens it in the detail pane instead of replacing the timeline. */
+  function openFocused(event: KeyboardEvent) {
+    if (!panel || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.repeat ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !active()) return;
+    const article = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
+    if (!article?.matches('article[data-testid="tweet"]') || !article.closest(PRIMARY_COLUMN)) return;
+    const url = detailUrl(postPermalink(article) ?? '', location.origin);
+    if (!url) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    returnFocus = article as HTMLElement;
+    if (article.ownerDocument === document) {
+      selectedArticle?.removeAttribute('data-site-enhancer-selected');
+      selectedArticle = article;
+      selectedArticle.setAttribute('data-site-enhancer-selected', '');
+    }
+    history.select(url);
+  }
+  /** Escape closes details unless a viewer, dialog, menu or editor is using it. */
+  function closeOnEscape(event: KeyboardEvent) {
+    if (!panel || !selected || event.key !== 'Escape' || event.defaultPrevented || event.isComposing ||
+      event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !active()) return;
+    const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
+    if (target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"],[role="menu"],[role="listbox"],dialog')) return;
+    const source = target?.ownerDocument ?? document;
+    const overlay = 'dialog[open],[aria-modal="true"],[role="menu"],[role="listbox"]';
+    if (document.querySelector(overlay) || (source !== document && source.querySelector(overlay))) return;
+    event.preventDefault();
+    history.select(undefined);
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+  }
   function storage(event: StorageEvent) {
     if (event.key === COLUMNS_COLLAPSED_KEY) { collapsed = event.newValue === 'true'; renderWidths(); return; }
     if (event.key !== COLUMNS_WIDTH_KEY) return;
     try { widths = parseColumnWidths(JSON.parse(event.newValue ?? 'null')); renderWidths(); } catch { /* Ignore invalid cross-tab data. */ }
   }
   document.addEventListener('click', click, true);
+  window.addEventListener('keydown', openFocused, true);
+  document.addEventListener('keydown', closeOnEscape);
   document.addEventListener('DOMContentLoaded', refresh);
   window.addEventListener('resize', refresh);
   window.addEventListener('pointermove', move);
@@ -702,6 +758,8 @@ export function installXColumns(options: {
       sheet.remove();
       history.remove();
       document.removeEventListener('click', click, true);
+      window.removeEventListener('keydown', openFocused, true);
+      document.removeEventListener('keydown', closeOnEscape);
       document.removeEventListener('DOMContentLoaded', refresh);
       window.removeEventListener('resize', refresh);
       window.removeEventListener('pointermove', move);

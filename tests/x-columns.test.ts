@@ -1269,3 +1269,60 @@ test('a fresh swipe after the momentum tail works without any pointer movement',
   wheelAtViewer(-100);
   assert.equal(document.querySelector('.se-image-count')!.textContent, '2 / 3');
 });
+
+function key(target: unknown, init: Record<string, unknown>, view: Window = win) {
+  const event = new view.KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  (target as EventTarget).dispatchEvent(event as unknown as Event);
+  return event;
+}
+test('Enter on a keyboard-focused post opens details instead of navigating the timeline', () => {
+  start();
+  const article = document.querySelector<HTMLElement>('article')!;
+  for (const init of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { isComposing: true }]) {
+    assert.equal(key(article, { key: 'Enter', ...init }).defaultPrevented, false);
+  }
+  assert.equal(key(document.querySelector('a[href="/alice"]')!, { key: 'Enter' }).defaultPrevented, false, 'focused links stay native');
+  assert.equal(document.querySelector('iframe'), null);
+  assert.ok(key(article, { key: 'Enter' }).defaultPrevented);
+  assert.equal(document.querySelector('iframe')?.src, 'https://x.com/alice/status/123');
+  assert.equal(location.pathname, '/home');
+  assert.equal(article.hasAttribute('data-site-enhancer-selected'), true);
+  columns!.setEnabled(false);
+  assert.equal(key(article, { key: 'Enter' }).defaultPrevented, false);
+});
+test('Escape closes details and returns focus, but leaves editors, menus and viewers alone', t => {
+  start();
+  const article = document.querySelector<HTMLElement>('article')!;
+  assert.equal(key(article, { key: 'Escape' }).defaultPrevented, false, 'nothing to close');
+  key(article, { key: 'Enter' });
+  const frame = document.querySelector('iframe')!;
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  signalDetail(detail);
+  assert.equal(key(detail.document.querySelector('textarea')!, { key: 'Escape' }, detail).defaultPrevented, false);
+  const menu = document.createElement('div');
+  menu.setAttribute('role', 'menu');
+  document.body.append(menu);
+  assert.equal(key(document.body, { key: 'Escape' }).defaultPrevented, false);
+  menu.remove();
+  const handled = new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  handled.preventDefault();
+  document.body.dispatchEvent(handled as unknown as Event);
+  assert.ok(document.querySelector('iframe'), 'an Escape already handled by a viewer does not close details');
+  assert.ok(key(detail.document.body, { key: 'Escape' }, detail).defaultPrevented);
+  assert.equal(document.querySelector('iframe'), null);
+  assert.equal(document.activeElement, article);
+  assert.equal(document.querySelector('[data-site-enhancer-selected]'), null);
+});
+test('the selected post stays highlighted when X re-renders its virtualized cell', async () => {
+  start();
+  const column = document.querySelector('[data-testid="primaryColumn"]')!;
+  const html = column.innerHTML;
+  click('time');
+  column.querySelector('article')!.remove();
+  column.insertAdjacentHTML('beforeend', `<div data-testid="cellInnerDiv">${html.replace('/alice/status/123', '/bob/status/7')}</div>`);
+  column.insertAdjacentHTML('beforeend', `<div data-testid="cellInnerDiv">${html}</div>`);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const marked = document.querySelectorAll('[data-site-enhancer-selected]');
+  assert.equal(marked.length, 1);
+  assert.equal(postPermalink(marked[0]), 'https://x.com/alice/status/123');
+});
