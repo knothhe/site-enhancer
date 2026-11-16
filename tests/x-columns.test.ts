@@ -135,6 +135,28 @@ test('opening details pauses feed videos and blocks later autoplay until details
   play(); assert.equal(video.paused, false, 'disabling columns removes the autoplay guard');
 });
 
+test('a feed video the user plays over details is not paused back, avoiding a play/pause loop', t => {
+  const feed = addVideo(); start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const other = addVideo(detail.document as unknown as Document);
+  signalDetail(detail);
+  other.play();
+  const autoplay = addVideo(); autoplay.play();
+  assert.equal(autoplay.video.paused, true, 'autoplay stays blocked');
+  feed.player.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true }) as unknown as Event);
+  const pauses = feed.pauses();
+  // X re-calls play() after an external pause; each call must now be left alone.
+  for (let i = 0; i < 3; i++) feed.play();
+  assert.equal(feed.video.paused, false);
+  assert.equal(feed.pauses(), pauses);
+  assert.equal(other.video.paused, true, 'only one video stays audible');
+  autoplay.play(); assert.equal(autoplay.video.paused, true);
+  selectDetail(456);
+  assert.equal(feed.video.paused, true, 'opening another post pauses the feed again');
+  feed.play(); assert.equal(feed.video.paused, true);
+});
+
 test('video expansion keeps the original node and source, then restores focus and page interaction', () => {
   const { player, video } = addVideo();
   video.src = 'blob:https://x.com/existing-stream';

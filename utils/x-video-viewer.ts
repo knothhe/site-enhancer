@@ -30,6 +30,10 @@ export function installXVideoViewer() {
   const documents = new Map<Document, { dispose: () => void; frame?: HTMLIFrameElement }>();
   let feedPaused = false;
   let expanded: { player: HTMLElement; close: () => void } | undefined;
+  // The player the user last pressed or keyed. X calls play() again whenever a video the
+  // user started is paused by someone else, so blocking that play loops play/pause every
+  // millisecond: audio stutters and crackles. Only autoplay is blocked.
+  let chosen: HTMLElement | undefined;
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
     ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看' }
     : { expand: 'Expand video', close: 'Close video · Esc', title: 'Video viewer' };
@@ -37,7 +41,12 @@ export function installXVideoViewer() {
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
   }
+  function exempt(video: HTMLVideoElement, doc: Document) {
+    if (expanded) return expanded.player.contains(video);
+    return !!chosen?.contains(video) && (doc === document || !blocked(doc));
+  }
   function pauseVideos(doc: Document) {
+    if (chosen?.ownerDocument === doc && chosen !== expanded?.player) chosen = undefined;
     for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) {
       if (!video.paused && !expanded?.player.contains(video)) video.pause();
     }
@@ -156,7 +165,7 @@ export function installXVideoViewer() {
         if (player) changed.add(player);
         const video = element as HTMLVideoElement;
         // A video may have started before its play event could reach this document.
-        if (pauseAdded && doc.contains(video) && !video.paused && !expanded?.player.contains(video)) video.pause();
+        if (pauseAdded && doc.contains(video) && !video.paused && !exempt(video, doc)) video.pause();
       }
       for (const { type, target, oldValue, addedNodes, removedNodes } of records) {
         if (type === 'attributes') {
@@ -196,16 +205,27 @@ export function installXVideoViewer() {
       event.preventDefault(); event.stopImmediatePropagation();
       if (expanded?.player === player) close(); else open(player, button, frame);
     }
+    function gesture(event: Event) {
+      const player = (event.target as Element | null)?.closest?.<HTMLElement>(PLAYER);
+      if (player) chosen = player;
+    }
     function play(event: Event) {
       const video = event.target as HTMLVideoElement;
-      if (video.tagName === 'VIDEO' && (blocked(doc) || expanded) && !expanded?.player.contains(video)) video.pause();
+      if (video.tagName !== 'VIDEO') return;
+      if (exempt(video, doc)) {
+        // Keep a single audible video across the timeline and detail documents.
+        if (!expanded) documents.forEach((_entry, other) => { if (other !== doc) pauseVideos(other); });
+      } else if (blocked(doc) || expanded) video.pause();
     }
     const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {
       if (expanded?.player.ownerDocument === doc) close();
+      if (chosen?.ownerDocument === doc) chosen = undefined;
       observer.disconnect();
       doc.removeEventListener('click', click, true);
       doc.removeEventListener('play', play, true);
+      doc.removeEventListener('pointerdown', gesture, true);
+      doc.removeEventListener('keydown', gesture, true);
       players.forEach(({ button }) => button.remove());
       style.remove();
     } });
@@ -214,6 +234,8 @@ export function installXVideoViewer() {
     });
     doc.addEventListener('click', click, true);
     doc.addEventListener('play', play, true);
+    doc.addEventListener('pointerdown', gesture, true);
+    doc.addEventListener('keydown', gesture, true);
     doc.querySelectorAll<HTMLElement>(POST_PLAYER).forEach(syncPlayer);
     if (blocked(doc)) pauseVideos(doc);
   }
@@ -232,6 +254,7 @@ export function installXVideoViewer() {
       close();
       documents.forEach(entry => entry.dispose()); documents.clear();
       feedPaused = false;
+      chosen = undefined;
     },
   };
 }
