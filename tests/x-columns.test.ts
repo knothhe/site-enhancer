@@ -1326,3 +1326,33 @@ test('the selected post stays highlighted when X re-renders its virtualized cell
   assert.equal(marked.length, 1);
   assert.equal(postPermalink(marked[0]), 'https://x.com/alice/status/123');
 });
+test('a click elsewhere closes an open X video context menu in the other document or under an intercepted click', t => {
+  start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  signalDetail(detail);
+  const openMenu = (doc: Document) => {
+    doc.body.insertAdjacentHTML('beforeend', '<div id="layers"><div role="menu">Copy video address</div></div>');
+    const layers = doc.getElementById('layers')!;
+    let closes = 0;
+    // X removes the menu from a click listener on its own document.
+    doc.addEventListener('click', function close() { closes++; layers.remove(); doc.removeEventListener('click', close); });
+    return () => closes;
+  };
+  const detailDoc = detail.document as unknown as Document;
+  let closes = openMenu(detailDoc);
+  click('a[href="/alice"]');
+  assert.equal(closes(), 1, 'a timeline click reaches the detail document');
+  assert.equal(detailDoc.querySelector('[role="menu"]'), null);
+  closes = openMenu(detailDoc);
+  const intercepted = new detail.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+  detail.document.querySelector('time')!.dispatchEvent(intercepted);
+  assert.ok(intercepted.defaultPrevented);
+  assert.equal(closes(), 1, 'an intercepted detail click still closes the detail menu');
+  closes = openMenu(document);
+  detail.document.body.dispatchEvent(new detail.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  assert.equal(closes(), 1, 'a detail click closes a timeline menu');
+  assert.equal(document.querySelector('[role="menu"]'), null);
+  click('time');
+  assert.equal(document.querySelectorAll('#layers').length, 0);
+});

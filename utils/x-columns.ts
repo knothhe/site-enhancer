@@ -677,7 +677,25 @@ export function installXColumns(options: {
     if (width !== renderedWidth) renderWidths(width);
     if (!measuredHeader?.isConnected) syncHeader();
   }
+  /** X closes a video's context menu only when a click reaches its own document. Clicks in
+   * another document (timeline vs. detail frame) and clicks this layout intercepts never do. */
+  let dismissing = false;
+  function dismissMenus(doc: Document) {
+    const view = doc.defaultView;
+    if (dismissing || !view || !doc.body || !doc.querySelector('#layers [role="menu"]')) return;
+    dismissing = true;
+    try { doc.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true, view, button: 0 })); }
+    finally { dismissing = false; }
+  }
   function click(event: MouseEvent) {
+    if (dismissing) return openFromClick(event);
+    const source = (event.target as Node | null)?.ownerDocument ?? document;
+    for (const doc of [document, ...frameDocuments.values()]) if (doc !== source) dismissMenus(doc);
+    const native = !event.defaultPrevented;
+    openFromClick(event);
+    if (native && event.defaultPrevented) dismissMenus(source);
+  }
+  function openFromClick(event: MouseEvent) {
     if (!panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (!target?.closest(PRIMARY_COLUMN) || !target.closest('article[data-testid="tweet"]') || !active()) return;
