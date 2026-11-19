@@ -4,6 +4,7 @@ import { installXVideoViewer } from './x-video-viewer.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
 import { resolveLocale, type Locale } from './i18n.ts';
+import { isXOverlayRoute } from './x-style.ts';
 /** Three-column layout. The timeline remains owned by X; details use a same-origin frame. */
 export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
@@ -772,7 +773,12 @@ export function installXColumns(options: {
   window.addEventListener('message', detailReady);
   return {
     setEnabled(value: boolean) { enabled = value; refresh(); },
-    onNavigate() { if (panel && !history.restore()) closeDetail(false); syncHeader(); refresh(); },
+    onNavigate() {
+      // Dialog routes such as quote and compose keep the timeline underneath, so keep its detail too.
+      if (panel && !history.restore() && !isXOverlayRoute(location.pathname)) closeDetail(false);
+      syncHeader();
+      refresh();
+    },
     remove() {
       disposed = true;
       langObserver.disconnect();

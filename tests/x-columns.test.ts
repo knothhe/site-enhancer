@@ -325,6 +325,25 @@ test('narrow windows retain native navigation, and widening restores the panel w
   assert.match(document.querySelector('#site-enhancer-columns')!.textContent!, /选择一条推文/);
 });
 
+test('dialog routes such as quote and compose keep the open detail frame', () => {
+  const controller = start();
+  click('time');
+  const frame = document.querySelector('iframe');
+  assert.ok(frame);
+  win.history.pushState({}, '', '/compose/post');
+  controller.onNavigate();
+  assert.equal(document.querySelector('iframe'), frame);
+  win.history.back();
+  win.history.pushState({}, '', '/alice/status/123/likes');
+  document.body.insertAdjacentHTML('beforeend', '<div id="layers"><div role="dialog" aria-modal="true"></div></div>');
+  controller.onNavigate();
+  assert.equal(document.querySelector('iframe'), frame);
+  document.getElementById('layers')!.remove();
+  win.history.pushState({}, '', '/explore');
+  controller.onNavigate();
+  assert.equal(document.querySelector('iframe'), null);
+});
+
 test('failed frame loading exposes retry, and closing prevents late work from recreating the frame', t => {
   t.mock.timers.enable({ apis: ['setInterval', 'Date'] });
   const controller = start();

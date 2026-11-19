@@ -2,7 +2,7 @@ import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import {
-  installXStyle, isXHost, isXStyle, readCachedXStyle,
+  installXStyle, isXHost, isXOverlayRoute, isXStyle, readCachedXStyle,
   X_PAGE_ATTR, X_STYLE_ATTR, X_STYLE_CACHE_KEY, X_STYLE_CSS, X_STYLE_OPTIONS, X_STYLES,
 } from '../utils/x-style.ts';
 
@@ -95,4 +95,14 @@ test('clean styles hide profile upsells without hiding profile details or posts'
     assert.equal(getComputedStyle(document.querySelector('#verification a')!).display, 'none');
   }
   style.remove();
+});
+
+test('compose routes and open modal dialogs count as overlays over the current page', () => {
+  assert.equal(isXOverlayRoute('/compose/post'), true);
+  assert.equal(isXOverlayRoute('/home'), false);
+  assert.equal(isXOverlayRoute('/composer'), false);
+  document.body.innerHTML = '<div id="layers"><div role="menu"></div></div>';
+  assert.equal(isXOverlayRoute('/alice/status/1/likes'), false);
+  document.getElementById('layers')!.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');
+  assert.equal(isXOverlayRoute('/alice/status/1/likes'), true);
 });

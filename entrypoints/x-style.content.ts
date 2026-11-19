@@ -1,6 +1,6 @@
 import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-ready';
 import { DETAIL_FRAME_CSS, DETAIL_FRAME_NAME, installXColumns } from '../utils/x-columns';
-import { installXStyle } from '../utils/x-style';
+import { installXStyle, isXOverlayRoute } from '../utils/x-style';
 import { installXTheme } from '../utils/x-theme';
 import { xStyleSetting, xThemeSetting } from '../utils/x-settings';
 
@@ -53,7 +53,8 @@ export default defineContentScript({
       stopThemeWatch();
     });
     ctx.addEventListener(window, 'wxt:locationchange', ({ newUrl }) => {
-      xStyle.setPage(newUrl.pathname);
+      // Keep the underlying page's styles while X shows a dialog route over it.
+      if (!isXOverlayRoute(newUrl.pathname)) xStyle.setPage(newUrl.pathname);
       columns?.onNavigate();
     });
     ctx.onInvalidated(() => columns?.remove());

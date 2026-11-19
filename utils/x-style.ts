@@ -112,6 +112,11 @@ export function readCachedXStyle(): XStyle {
   }
 }
 
+/** X opens compose, quote and other dialogs as routes while the previous page stays rendered underneath. */
+export function isXOverlayRoute(pathname: string, doc: Document = document) {
+  return pathname.startsWith('/compose/') || !!doc.querySelector('#layers [aria-modal="true"]');
+}
+
 /** Installs the stylesheet and returns setters for the active style and current page. */
 export function installXStyle(initial: XStyle = readCachedXStyle()) {
   const root = document.documentElement;
