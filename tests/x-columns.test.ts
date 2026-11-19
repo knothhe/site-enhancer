@@ -2,7 +2,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY } from '../utils/x-columns.ts';
+import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS } from '../utils/x-columns.ts';
 
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
 
@@ -28,6 +28,19 @@ function click(selector: string, init = {}) {
   return event;
 }
 
+test('X layer overlays lift the app root above the fixed detail panel only while open', () => {
+  const lift = COLUMNS_CSS.split('\n').find(line => !line.startsWith('/*') && line.includes('#layers') && line.includes('z-index'))!;
+  const selector = lift.slice(0, lift.indexOf('{')).replace(':root[data-site-enhancer-columns] ', '');
+  const panelZ = Number(/#site-enhancer-columns\{[^}]*z-index:(\d+)/.exec(COLUMNS_CSS)![1]);
+  const toggleZ = Number(/#site-enhancer-nav-toggle\{[^}]*z-index:(\d+)/.exec(COLUMNS_CSS)![1]);
+  assert.ok(Number(/z-index:(\d+)/.exec(lift)![1]) > Math.max(panelZ, toggleZ));
+  // happy-dom mis-evaluates descendant combinators inside :has(), so the live match is verified in Chrome.
+  assert.match(selector, /^#react-root>div:has\(>div>#layers :is\(/);
+  for (const overlay of ['[role="dialog"]', '[aria-modal="true"]', '[role="menu"]', '[role="listbox"]', '[role="alert"]', '[data-testid="HoverCard"]']) assert.ok(selector.includes(overlay), overlay);
+  assert.ok(!/GrokDrawer|chat-drawer/.test(selector), 'idle drawers never lift the app over the panel');
+  assert.match(COLUMNS_CSS, /#layers :is\(\[data-testid="GrokDrawer"\],\[data-testid="chat-drawer-root"\],\[data-testid="DMDrawer"\]\)\{display:none!important\}/);
+  assert.doesNotThrow(() => new win.CSSStyleSheet().replaceSync(COLUMNS_CSS));
+});
 test('width preferences reject invalid values and preserve valid explicit values', () => {
   for (const value of [null, {}, { nav: 0, share: .5 }, { nav: 200, share: Infinity }, { nav: 200, share: .01 }]) {
     assert.deepEqual(parseColumnWidths(value), { nav: 200, share: .52 });

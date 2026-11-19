@@ -69,6 +69,10 @@ ${SCOPE} main[role="main"]{width:var(--se-feed)!important;max-width:var(--se-fee
 ${SCOPE} main[role="main"]>div,${SCOPE} div:has(>[data-testid="primaryColumn"]),${SCOPE} [data-testid="primaryColumn"]{width:100%!important;max-width:100%!important;min-width:0!important}
 ${SCOPE} [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 ${SCOPE} [data-testid="sidebarColumn"]{display:none!important}
+/* X renders dialogs, menus, hover cards and toasts in #layers inside its z-index:0 app root; lift that root above the fixed panel while one is open. */
+${SCOPE} #react-root>div:has(>div>#layers :is([role="dialog"],[aria-modal="true"],[role="menu"],[role="listbox"],[role="alert"],[data-testid="HoverCard"])){z-index:6!important}
+/* The bottom-right drawers sit under the detail panel and would only flash over it while the app root is lifted. */
+${SCOPE} #layers :is([data-testid="GrokDrawer"],[data-testid="chat-drawer-root"],[data-testid="DMDrawer"]){display:none!important}
 ${SCOPE} [data-site-enhancer-selected]{box-shadow:inset 2px 0 color-mix(in srgb,var(--se-x-accent,#1d9bf0) 55%,transparent);background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 4%,transparent)!important}
 /* Compact navigation keeps every glyph on the same 24px / 48px grid. */
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"]>div>div>div{padding-left:0!important;padding-right:0!important;align-items:center!important}
