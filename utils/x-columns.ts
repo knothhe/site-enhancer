@@ -19,10 +19,12 @@ export function parseColumnWidths(value: unknown): ColumnWidths {
   return Number.isFinite(nav) && nav >= 88 && nav <= 280 && Number.isFinite(share) && share >= .25 && share <= .75
     ? { nav, share } : { ...DEFAULT_COLUMNS };
 }
+const MAX_FEED = 680;
+const shareBasis = (available: number) => Math.min(available, MAX_FEED / DEFAULT_COLUMNS.share);
 export function columnGeometry(width: number, preference: ColumnWidths) {
   const nav = Math.min(preference.nav, Math.max(88, width - 800));
   const available = width - nav;
-  const feed = Math.max(360, Math.min(available - 360, Math.round(available * preference.share)));
+  const feed = Math.max(360, Math.min(MAX_FEED, available - 360, Math.round(shareBasis(available) * preference.share)));
   return { nav, feed, detail: available - feed };
 }
 /** The post's own timestamp link, skipping timestamps inside quoted-post cards. */
@@ -48,6 +50,7 @@ main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),
 [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
 [data-testid="primaryColumn"]>div>div:has([data-testid="app-bar-back"]):not(:has(section)){display:none!important}
 [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{border-bottom-color:var(--se-x-border,rgba(127,127,127,.16))!important}
+main[role="main"] [data-testid="primaryColumn"]{max-width:760px!important;margin-inline:auto!important}
 html{scrollbar-width:thin;scrollbar-color:#8885 transparent}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
@@ -70,6 +73,14 @@ ${SCOPE} main[role="main"]{width:var(--se-feed)!important;max-width:var(--se-fee
 ${SCOPE} main[role="main"]>div,${SCOPE} div:has(>[data-testid="primaryColumn"]),${SCOPE} [data-testid="primaryColumn"]{width:100%!important;max-width:100%!important;min-width:0!important}
 ${SCOPE} [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 ${SCOPE} [data-testid="sidebarColumn"]{display:none!important}
+${SCOPE}:has(#site-enhancer-columns [data-state="empty"]) [data-testid="sidebarColumn"]{display:flex!important;position:fixed!important;inset:var(--se-column-header-height,54px) 0 0 auto!important;width:var(--se-detail)!important;max-width:none!important;margin:0!important;overflow:auto;padding-inline:16px;box-sizing:border-box}
+${SCOPE} [data-testid="sidebarColumn"]>div{width:100%!important;max-width:600px!important;margin-inline:auto!important}
+${SCOPE} [data-testid="sidebarColumn"]>div div:is(:has(form[role="search"]),:has([data-testid="trend"])){width:100%!important;max-width:none!important;box-sizing:border-box}
+${SCOPE} [data-testid="sidebarColumn"]>div>div{position:static!important}
+${SCOPE} [data-testid="sidebarColumn"] div:has(>form[role="search"]),${SCOPE} [data-testid="sidebarColumn"] div:has(form[role="search"]):not(:has([data-testid="trend"])){position:static!important;background:var(--se-x-bg,inherit)!important}
+${SCOPE} [data-testid="sidebarColumn"] div:has([data-testid="trend"])>div:has(form[role="search"]):not(:has([data-testid="trend"])){position:sticky!important;top:0!important;z-index:2;background:var(--se-x-bg,inherit)!important}
+${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
+${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns [data-state="empty"]{display:none}
 /* X renders dialogs, menus, hover cards and toasts in #layers inside its z-index:0 app root; lift that root above the fixed panel while one is open. */
 ${SCOPE} #react-root>div:has(>div>#layers :is([role="dialog"],[aria-modal="true"],[role="menu"],[role="listbox"],[role="alert"],[data-testid="HoverCard"])){z-index:6!important}
 /* The bottom-right drawers sit under the detail panel and would only flash over it while the app root is lifted. */
@@ -89,17 +100,18 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:not(:first-child){display:none!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:first-child{width:24px!important;height:24px!important;min-width:24px!important;flex-basis:24px!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"] :is(img,[data-testid^="UserAvatar-Container"]){width:24px!important;height:24px!important;min-width:24px!important}
-#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 18px);top:72px;z-index:5;width:32px;height:32px;padding:6px;border:1px solid var(--se-column-line);border-radius:50%;background:var(--se-x-bg,#fff);color:var(--se-x-text,#536471);cursor:pointer}
+#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 16px);bottom:80px;z-index:5;width:32px;height:32px;padding:6px;border:1px solid var(--se-column-line);border-radius:50%;background:var(--se-x-bg,#fff);color:var(--se-x-text,#536471);cursor:pointer}
 #site-enhancer-nav-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65}
 #site-enhancer-nav-toggle:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 .se-column-divider[hidden]{display:none}
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
 #site-enhancer-columns *{box-sizing:border-box}
 #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid var(--se-column-line)}
-#site-enhancer-columns .se-column-toolbar strong{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap}
+#site-enhancer-columns .se-column-toolbar .se-column-title{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap}
 #site-enhancer-columns button,#site-enhancer-columns a{font:inherit;color:inherit;background:transparent;border:0;text-decoration:none;cursor:pointer;border-radius:9px}
 #site-enhancer-columns .se-column-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:7px;color:var(--se-x-muted,var(--se-native-muted,#65717b));transition:background .15s,color .15s}
-#site-enhancer-columns button:disabled{opacity:.28;cursor:default}
+#site-enhancer-columns button:disabled{cursor:default}
+#site-enhancer-columns button:disabled:not(.se-column-title){opacity:.28}
 #site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
 #site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 #site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
@@ -110,6 +122,7 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns [hidden]{display:none!important}
 /* Retain the cached browsing viewport: display:none resets inner layout and scroll in Chromium. */
 #site-enhancer-columns iframe[hidden]{display:block!important;position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px));visibility:hidden!important;pointer-events:none}
+#site-enhancer-columns iframe[hidden][data-switch-preview]{position:static;height:auto;visibility:visible!important}
 #site-enhancer-columns .se-column-status{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 28px 96px;text-align:center;color:inherit}
 #site-enhancer-columns .se-column-status strong{font-size:18px;font-weight:600;letter-spacing:-.02em}
 #site-enhancer-columns .se-column-status p{color:var(--se-x-muted,var(--se-native-muted,#65717b));line-height:1.8;max-width:260px;margin:12px 0 0}
@@ -117,6 +130,8 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns .se-status-icon svg{width:25px;height:25px;stroke-width:1.35}
 #site-enhancer-columns .se-column-status button{margin-top:20px;padding:8px 20px;background:color-mix(in srgb,currentColor 6%,transparent);font-weight:600}
 #site-enhancer-columns [data-state="loading"] .se-status-icon svg{animation:se-column-spin 1.4s linear infinite}
+#site-enhancer-columns[data-switching] .se-column-toolbar::after{content:"";position:absolute;top:var(--se-column-header-height,54px);left:0;width:30%;height:2px;background:var(--se-x-accent,#1d9bf0);animation:se-progress 1s ease-in-out infinite alternate;z-index:1}
+@keyframes se-progress{to{transform:translateX(230%)}}
 @keyframes se-column-spin{to{transform:rotate(360deg)}}
 .se-column-divider{position:fixed;top:0;bottom:0;width:10px;margin-left:-5px;z-index:4;cursor:col-resize;touch-action:none;background:transparent;border:0;padding:0}
 .se-column-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:1px;background:var(--se-column-line);transition:background .15s}
@@ -129,6 +144,7 @@ ${SCOPE}[data-site-enhancer-resizing],${SCOPE}[data-site-enhancer-resizing] *{cu
 `;
 
 const zh = {
+  focusHint: '定位时间线中的推文 · ] 进入详情，[ 返回',
   collapseNav: '收起侧边栏', expandNav: '展开侧边栏',
   saveFailed: '栏宽已调整，但无法保存', saveFailedHint: '本次页面仍会使用当前宽度。',
   empty: '选择一条推文', emptyHint: '点击时间线中的推文，在这里查看详情和回复。',
@@ -142,6 +158,7 @@ const zh = {
 export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
   zh,
   en: {
+    focusHint: 'Locate post in timeline · ] focuses details, [ returns',
     collapseNav: 'Collapse sidebar', expandNav: 'Expand sidebar',
     saveFailed: 'Column widths changed but couldn’t be saved', saveFailedHint: 'This page keeps the current widths.',
     empty: 'Select a post', emptyHint: 'Click a post in the timeline to see it and its replies here.',
@@ -192,6 +209,8 @@ export function installXColumns(options: {
   const frameDocuments = new Map<HTMLIFrameElement, Document>();
   let checkFrame: (() => void) | undefined;
   let loadingFrame: HTMLIFrameElement | undefined;
+  let title: HTMLButtonElement;
+  let previous: HTMLIFrameElement | undefined;
   let status: HTMLElement;
   let openLink: HTMLAnchorElement;
   let retry: HTMLButtonElement;
@@ -202,6 +221,11 @@ export function installXColumns(options: {
   let renderedWidth: number | undefined;
   let drag: { kind: number; x: number; widths: ColumnWidths } | undefined;
   let returnFocus: HTMLElement | undefined;
+  let selectedOffset: number | undefined;
+  let locatePending = false;
+  function emphasize(article: Element) {
+    article.animate?.([{ outline: '2px solid var(--se-x-accent,#1d9bf0)' }, { outline: '2px solid transparent' }], 650);
+  }
   let selectedArticle: Element | undefined;
   let bodyObserver: MutationObserver | undefined;
   let headerObserver: MutationObserver | undefined;
@@ -233,6 +257,7 @@ export function installXColumns(options: {
   }
   type Label = keyof typeof COLUMNS_LABELS.en;
   function showStatus(title: Label, description: Label, state: 'empty' | 'loading' | 'error' = 'empty') {
+    if (state !== 'loading') hidePrevious();
     lastStatus = [title, description, state];
     status.replaceChildren();
     const heading = document.createElement('strong');
@@ -293,35 +318,126 @@ export function installXColumns(options: {
     checkFrame?.();
   }
   function closeDetail(restoreFocus = true) {
-    if (frame || selected) options.releaseDetail?.();
+    cancelHover();
+    if (selected || frame) options.releaseDetail?.();
     clearFrames();
     frame = undefined;
     selected = undefined;
     videoViewer.setFeedPaused(false);
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = undefined;
+    selectedOffset = undefined;
+    locatePending = false;
     openLink.hidden = true;
     retry.hidden = true;
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
+    updateTitle();
     showStatus('empty', 'emptyHint');
     if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+  }
+  let hoverFrame: { url: string; frame: HTMLIFrameElement } | undefined;
+  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+  let followTimer: ReturnType<typeof setTimeout> | undefined;
+  function makeFrame() {
+    const current = document.createElement('iframe');
+    current.name = DETAIL_FRAME_NAME;
+    current.title = t.frameTitle;
+    current.allow = 'fullscreen; picture-in-picture';
+    current.allowFullscreen = true;
+    // Keep native popups, media and forms, but prevent a child route from replacing the timeline.
+    current.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
+    return current;
+  }
+  let hoverArticle: Element | undefined;
+  let lastScroll = -Infinity;
+  function scrolling() {
+    lastScroll = Date.now();
+    cancelHover();
+  }
+  function cancelHover() {
+    hoverArticle = undefined;
+    clearTimeout(hoverTimer);
+    if (!hoverFrame) return;
+    hoverFrame.frame.remove();
+    hoverFrame = undefined;
+    options.releaseDetail?.();
+  }
+  const tweet = 'article[data-testid="tweet"]';
+  const overlay = '[role="dialog"],dialog[open],[aria-modal="true"],[role="menu"],[role="listbox"]';
+  function hover(event: PointerEvent) {
+    const article = (event.target as Element)?.closest?.(tweet);
+    if (!article?.closest(PRIMARY_COLUMN) || article.contains(event.relatedTarget as Node | null)) return;
+    if (event.type === 'pointermove' && article === hoverArticle) return;
+    cancelHover();
+    if (event.type === 'pointerout' || event.pointerType === 'touch' || !selected || !panel || loadingFrame || Date.now() - lastScroll < 200) return;
+    hoverArticle = article;
+    hoverTimer = setTimeout(() => {
+      const url = detailUrl(postPermalink(article) ?? '', location.origin);
+      if (!url || !selected || !panel || loadingFrame || !article.isConnected || readyFrames.has(url) || document.querySelector(overlay)) return;
+      const current = makeFrame();
+      current.hidden = true;
+      hoverFrame = { url, frame: current };
+      panel.append(current);
+      const request = options.prepareDetail?.(url) ?? Promise.resolve(url);
+      void request.then(src => { if (current.isConnected) current.src = src; }).catch(() => {
+        if (hoverFrame?.frame === current) cancelHover();
+        else if (frame === current) failLoad(current, 'failedHint');
+      });
+    }, 200);
+  }
+  function follow(event: FocusEvent) {
+    clearTimeout(followTimer);
+    const article = event.target as HTMLElement;
+    if (!selected || !article.matches?.(tweet) || !article.closest(PRIMARY_COLUMN) || article.isContentEditable) return;
+    followTimer = setTimeout(() => {
+      const url = detailUrl(postPermalink(article) ?? '', location.origin);
+      if (selected && url && url !== selected && article === document.activeElement && !document.querySelector(overlay)) {
+        returnFocus = article;
+        history.select(url);
+      }
+    }, 150);
+  }
+  function updateTitle() {
+    const handle = selected && new URL(selected).pathname.match(/^\/([\w]+)\/status\//)?.[1];
+    title.textContent = handle ? '@' + handle : selectedArticle?.querySelector('[data-testid="User-Name"]')?.textContent || t.title;
+    title.title = selected ? t.focusHint : '';
+    title.disabled = !selected;
+  }
+  function hidePrevious() {
+    if (previous) { previous.hidden = true; previous.inert = false; previous.removeAttribute('data-switch-preview'); }
+    previous = undefined;
+    panel?.removeAttribute('data-switching');
+  }
+  function failLoad(current: HTMLIFrameElement, hint: Label) {
+    stopFrameWatch();
+    discardFrame(current);
+    frame = undefined;
+    showStatus('failed', hint, 'error');
+    retry.hidden = false;
   }
   function openDetail(url: string) {
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(article =>
       detailUrl(postPermalink(article) ?? '', location.origin) === url);
     selectedArticle?.setAttribute('data-site-enhancer-selected', '');
+    selectedOffset = selectedArticle ? window.scrollY + selectedArticle.getBoundingClientRect().top : undefined;
+    locatePending = false;
+    const visible = selected ? readyFrames.get(selected)?.frame : undefined;
     parkFrame();
+    if (visible?.isConnected) previous = visible;
     frame = undefined;
     selected = url;
+    updateTitle();
     videoViewer.setFeedPaused(true);
     openLink.href = url;
     openLink.hidden = false;
     retry.hidden = true;
     const cached = readyFrames.get(url);
     if (cached && reusable(url, cached)) {
+      cancelHover();
       readyFrames.delete(url); readyFrames.set(url, cached);
+      hidePrevious();
       frame = cached.frame; frame.hidden = false; frame.title = t.frameTitle;
       status.hidden = true;
       cached.doc.defaultView?.scrollTo(cached.scrollX, cached.scrollY);
@@ -331,28 +447,28 @@ export function installXColumns(options: {
     // Bound the cache to two connected frames, including the incoming load.
     while (readyFrames.size > 1) discardFrame(readyFrames.values().next().value!.frame);
     showStatus('loading', 'loadingHint', 'loading');
-    const current = document.createElement('iframe');
-    current.name = DETAIL_FRAME_NAME;
-    current.title = t.frameTitle;
-    current.allow = 'fullscreen; picture-in-picture';
-    current.allowFullscreen = true;
-    // Keep native popups, media and forms, but prevent a child route from replacing the timeline.
-    current.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads');
-    if (options.prepareDetail) {
+    if (previous?.isConnected) {
+      previous.inert = true;
+      previous.setAttribute('data-switch-preview', '');
+      status.hidden = true;
+      panel!.setAttribute('data-switching', '');
+    }
+    const prepared = hoverFrame?.url === url ? hoverFrame : undefined;
+    if (prepared) hoverFrame = undefined;
+    cancelHover();
+    const current = prepared?.frame ?? makeFrame();
+    if (prepared) current.hidden = false;
+    else if (options.prepareDetail) {
       void options.prepareDetail(url).then(prepared => {
         if (frame === current && panel && !disposed) current.src = prepared;
       }).catch(() => {
         if (frame !== current || !panel || disposed) return;
-        stopFrameWatch();
-        discardFrame(current);
-        frame = undefined;
-        showStatus('failed', 'failedHint', 'error');
-        retry.hidden = false;
+        failLoad(current, 'failedHint');
       });
     } else current.src = url;
     current.style.visibility = 'hidden';
     frame = current;
-    panel!.append(current);
+    if (!current.isConnected) panel!.append(current);
     const started = Date.now();
     const check = () => {
       if (frame !== current || !panel || disposed) return;
@@ -371,10 +487,14 @@ export function installXColumns(options: {
             doc.addEventListener('click', click, true);
             doc.addEventListener('keydown', openFocused, true);
             doc.addEventListener('keydown', closeOnEscape);
+            if (!selectedArticle && title.textContent === t.title) {
+              title.textContent = primary.querySelector('[data-testid="User-Name"]')?.textContent || t.title;
+            }
             frameDocuments.set(current, doc);
             videoViewer.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
             while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
+            hidePrevious();
             current.style.visibility = '';
             status.hidden = true;
             retry.hidden = true;
@@ -384,11 +504,7 @@ export function installXColumns(options: {
         }
       } catch { /* Cross-origin redirects or a blocked frame fall back to a normal link. */ }
       if (Date.now() - started > 20000) {
-        stopFrameWatch();
-        discardFrame(current);
-        frame = undefined;
-        showStatus('failed', 'retryHint', 'error');
-        retry.hidden = false;
+        failLoad(current, 'retryHint');
       }
     };
     checkFrame = check; loadingFrame = current;
@@ -454,21 +570,29 @@ export function installXColumns(options: {
     localized(() => current.setAttribute('aria-label', t.panel));
     const toolbar = document.createElement('div');
     toolbar.className = 'se-column-toolbar';
-    const title = document.createElement('strong');
-    localized(() => { title.textContent = t.title; });
+    title = document.createElement('button');
+    title.className = 'se-column-title';
+    title.type = 'button';
+    title.addEventListener('click', () => {
+      if (selectedArticle?.isConnected) {
+        selectedArticle.scrollIntoView({ block: 'center' });
+        emphasize(selectedArticle);
+      } else if (selectedOffset !== undefined) {
+        locatePending = true;
+        window.scrollTo({ top: Math.max(0, selectedOffset - window.innerHeight / 2) });
+      }
+    });
+    localized(updateTitle);
     openLink = document.createElement('a');
     iconControl(openLink, 'newTab', 'external');
     openLink.target = '_blank';
     openLink.rel = 'noopener noreferrer';
     retry = button('retry', () => { if (selected) openDetail(selected); });
-    const search = document.createElement('a');
-    search.href = '/explore';
-    iconControl(search, 'search', 'search');
     backButton = button('back', () => history.back(), 'back');
     forwardButton = button('forward', () => history.forward(), 'forward');
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    toolbar.append(title, backButton, forwardButton, search, button('reset', reset, 'reset'), openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    toolbar.append(title, backButton, forwardButton, openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -544,6 +668,12 @@ export function installXColumns(options: {
       for (const article of articles) {
         if (!article.closest(PRIMARY_COLUMN) || detailUrl(postPermalink(article) ?? '', location.origin) !== selected) continue;
         selectedArticle = article;
+        selectedOffset = window.scrollY + article.getBoundingClientRect().top;
+        if (locatePending) {
+          locatePending = false;
+          emphasize(article);
+        }
+        updateTitle();
         article.setAttribute('data-site-enhancer-selected', '');
         return;
       }
@@ -608,7 +738,7 @@ export function installXColumns(options: {
       divider.style.left = `${index === 0 ? nav : nav + feed}px`;
       divider.setAttribute('aria-valuenow', String(index === 0 ? nav : feed));
       divider.setAttribute('aria-valuemin', index === 0 ? '88' : '360');
-      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : width - nav - 360));
+      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : columnGeometry(width, { nav, share: .75 }).feed));
     });
   }
   function renderTheme() {
@@ -626,7 +756,7 @@ export function installXColumns(options: {
     const width = viewportWidth();
     const { nav, feed } = columnGeometry(width, collapsed ? { ...widths, nav: 88 } : widths);
     if (kind === 0) { collapsed = false; widths.nav = Math.max(88, Math.min(280, nav + delta)); }
-    else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(width - nav - 360, feed + delta)) / (width - nav)));
+    else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(MAX_FEED, width - nav - 360, feed + delta)) / shareBasis(width - nav)));
     renderWidths(width);
   }
   function move(event: PointerEvent) {
@@ -643,11 +773,14 @@ export function installXColumns(options: {
   }
   function blur() { end(); }
   function unmount() {
+    hidePrevious();
+    cancelHover();
+    clearTimeout(followTimer);
     imageViewer.close();
     videoViewer.remove();
     navToggle?.remove();
     navToggle = undefined;
-    if (frame || selected) options.releaseDetail?.();
+    if (selected || frame) options.releaseDetail?.();
     selected = undefined;
     clearFrames();
     drag = undefined;
@@ -661,6 +794,8 @@ export function installXColumns(options: {
     unmeasuredHeaderElements = [];
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = undefined;
+    selectedOffset = undefined;
+    locatePending = false;
     panel?.remove();
     panel = undefined;
     renderedWidth = undefined;
@@ -726,6 +861,27 @@ export function installXColumns(options: {
   }
   /** Enter on a focused post (X's j/k focus) opens it in the detail pane instead of replacing the timeline. */
   function openFocused(event: KeyboardEvent) {
+    // X reserves L for Like. Unmodified brackets are free in its web shortcut list.
+    if (selected && panel && !event.isComposing && !event.defaultPrevented && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey &&
+      (event.key === '[' || event.key === ']')) {
+      const target = event.target as HTMLElement;
+      if (!target.closest || target.isContentEditable || target.closest('input,textarea,select,[contenteditable="true"]') ||
+        document.querySelector(overlay) || target.ownerDocument.querySelector(overlay)) return;
+      let destination: HTMLElement | undefined;
+      if (event.key === ']' && target.ownerDocument === document && target.closest(PRIMARY_COLUMN) && frame) {
+        const articles = frameDocuments.get(frame)?.querySelectorAll<HTMLElement>(PRIMARY_COLUMN + ' article[data-testid="tweet"]');
+        if (articles) destination = Array.from(articles).find(article => detailUrl(postPermalink(article) ?? '', location.origin) === selected) ?? articles[0];
+      } else if (event.key === '[' && target.ownerDocument === frame?.contentDocument) {
+        destination = selectedArticle as HTMLElement ?? returnFocus;
+      }
+      if (destination?.isConnected) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (!destination.hasAttribute('tabindex')) destination.tabIndex = -1;
+        destination.focus({ preventScroll: true });
+      }
+      return;
+    }
     if (!panel || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.repeat ||
       event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !active()) return;
     const article = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
@@ -760,6 +916,11 @@ export function installXColumns(options: {
     if (event.key !== COLUMNS_WIDTH_KEY) return;
     try { widths = parseColumnWidths(JSON.parse(event.newValue ?? 'null')); renderWidths(); } catch { /* Ignore invalid cross-tab data. */ }
   }
+  document.addEventListener('focusin', follow);
+  document.addEventListener('pointermove', hover);
+  window.addEventListener('scroll', scrolling, { capture: true, passive: true });
+  window.addEventListener('wheel', scrolling, { capture: true, passive: true });
+  document.addEventListener('pointerout', hover);
   document.addEventListener('click', click, true);
   window.addEventListener('keydown', openFocused, true);
   document.addEventListener('keydown', closeOnEscape);
@@ -785,6 +946,11 @@ export function installXColumns(options: {
       unmount();
       sheet.remove();
       history.remove();
+      document.removeEventListener('focusin', follow);
+      document.removeEventListener('pointermove', hover);
+      window.removeEventListener('scroll', scrolling, true);
+      window.removeEventListener('wheel', scrolling, true);
+      document.removeEventListener('pointerout', hover);
       document.removeEventListener('click', click, true);
       window.removeEventListener('keydown', openFocused, true);
       document.removeEventListener('keydown', closeOnEscape);

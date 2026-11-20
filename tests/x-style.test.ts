@@ -106,3 +106,16 @@ test('compose routes and open modal dialogs count as overlays over the current p
   document.getElementById('layers')!.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');
   assert.equal(isXOverlayRoute('/alice/status/1/likes'), true);
 });
+
+test('columns sidebar keeps search and trends visible while hiding promotions and recommendations', () => {
+  document.body.innerHTML = `<div data-testid="sidebarColumn"><form role="search"></form>
+    <section id="trends"><div data-testid="trend"></div></section><section id="follow"></section>
+    <aside></aside><div data-testid="placementTracking"></div><nav></nav></div>`;
+  const style = installXStyle('columns');
+  root().setAttribute('data-site-enhancer-columns', '');
+  for (const selector of ['form', '#trends']) assert.notEqual(getComputedStyle(document.querySelector(selector)!).display, 'none');
+  for (const selector of ['#follow', 'aside', '[data-testid="placementTracking"]', 'nav']) {
+    assert.equal(getComputedStyle(document.querySelector(selector)!).display, 'none', selector);
+  }
+  style.remove();
+});

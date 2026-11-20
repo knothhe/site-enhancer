@@ -52,6 +52,7 @@ test('every supported viewport preserves minimum reading widths and fills availa
     for (const nav of [88, 200, 280]) for (const share of [.25, .52, .75]) {
       const geometry = columnGeometry(width, { nav, share });
       assert.ok(geometry.feed >= 360);
+      assert.ok(geometry.feed <= 680);
       assert.ok(geometry.detail >= 360);
       assert.equal(geometry.nav + geometry.feed + geometry.detail, width);
     }
@@ -1387,4 +1388,96 @@ test('a click elsewhere closes an open X video context menu in the other documen
   assert.equal(document.querySelector('[role="menu"]'), null);
   click('time');
   assert.equal(document.querySelectorAll('#layers').length, 0);
+});
+
+test('hover intent cancels speculative rules and reuses the hovered frame on selection', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let prepared = 0;
+  let released = 0;
+  columns = installXColumns({
+    prepareDetail: async url => { prepared++; return url; },
+    releaseDetail: () => { released++; },
+  });
+  columns.setEnabled(true);
+  const article = document.querySelector('article')!;
+  const pointer = (type: string) => article.dispatchEvent(new win.PointerEvent(type, { bubbles: true }) as unknown as Event);
+  pointer('pointermove');
+  t.mock.timers.tick(200);
+  assert.equal(prepared, 0, 'empty details do not prefetch');
+  const first = selectDetail(456);
+  await Promise.resolve();
+  signalDetail(attachReadyDetail(t, first, 'https://x.com/alice/status/456'));
+  article.querySelector('a')!.href = '/alice/status/123';
+  pointer('pointermove');
+  t.mock.timers.tick(199);
+  window.dispatchEvent(new win.Event('scroll') as unknown as Event);
+  pointer('pointermove');
+  t.mock.timers.tick(200);
+  assert.equal(prepared, 1, 'scroll cancels the dwell and suppresses immediate movement');
+  const later = Date.now() + 201;
+  t.mock.method(Date, 'now', () => later);
+  pointer('pointermove');
+  t.mock.timers.tick(199);
+  assert.equal(prepared, 1);
+  t.mock.timers.tick(1);
+  pointer('pointerout');
+  assert.equal(released, 1);
+  assert.equal(document.querySelector('iframe[hidden]'), null);
+  pointer('pointermove');
+  t.mock.timers.tick(200);
+  const speculative = document.querySelector<HTMLIFrameElement>('iframe[hidden]');
+  assert.ok(speculative?.hidden);
+  click('time');
+  await Promise.resolve();
+  assert.equal(document.querySelector('iframe:not([hidden])'), speculative);
+  assert.equal(prepared, 3);
+  assert.equal(speculative.src, 'https://x.com/alice/status/123');
+  columns.remove();
+  assert.equal(released, 2);
+});
+
+test('empty sidebar resets the native margin and fixed search positioning', () => {
+  assert.match(COLUMNS_CSS, /width:var\(--se-detail\)!important;max-width:none!important;margin:0!important/);
+  assert.match(COLUMNS_CSS, /sidebarColumn"\]>div\{width:100%!important;max-width:600px!important;margin-inline:auto/);
+  assert.match(COLUMNS_CSS, /:not\(:has\(\[data-testid="trend"\]\)\)\{position:static!important/);
+});
+
+test('right bracket focuses the matching detail post for native scrolling keys', t => {
+  start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const post = detail.document.querySelector('article')!;
+  post.insertAdjacentHTML('beforebegin', '<article data-testid="tweet"><a href="/bob/status/9"><time></time></a></article>');
+  signalDetail(detail);
+  assert.ok(key(document.querySelector('article')!, { key: ']' }).defaultPrevented);
+  assert.equal(detail.document.activeElement, post);
+  const received: string[] = [];
+  detail.document.addEventListener('keydown', event => { if (event instanceof detail.KeyboardEvent) received.push(event.key); });
+  for (const name of [' ', 'ArrowDown', 'PageDown']) {
+    assert.equal(key(detail.document.activeElement!, { key: name }, detail).defaultPrevented, false);
+  }
+  assert.deepEqual(received, [' ', 'ArrowDown', 'PageDown']);
+});
+
+test('title locates a virtualized selected post and emphasizes its replacement once', async () => {
+  start();
+  const article = document.querySelector('article')!;
+  const html = article.outerHTML;
+  Object.defineProperty(article, 'getBoundingClientRect', { value: () => ({ top: 1800 }) });
+  click('time');
+  article.remove();
+  let top: number | undefined;
+  Object.defineProperty(window, 'scrollTo', { value: (options: ScrollToOptions) => { top = options.top; } });
+  click('.se-column-title');
+  assert.equal(top, 1800 - window.innerHeight / 2);
+  let animations = 0;
+  for (let i = 0; i < 2; i++) {
+    document.querySelector('[data-testid="primaryColumn"]')!.insertAdjacentHTML('beforeend', html);
+    const replacement = document.querySelector('article')!;
+    Object.defineProperty(replacement, 'animate', { value: () => animations++ });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(replacement.hasAttribute('data-site-enhancer-selected'));
+    assert.equal(animations, 1);
+    replacement.remove();
+  }
 });
