@@ -1481,3 +1481,21 @@ test('title locates a virtualized selected post and emphasizes its replacement o
     replacement.remove();
   }
 });
+
+test('native icon rail follows label removal and restores the saved nav width', async () => {
+  localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify({ nav: 240, share: .5 }));
+  document.body.insertAdjacentHTML('afterbegin', '<header role="banner"><nav><a href="/home"><svg></svg></a></nav></header>');
+  start();
+  const width = () => document.documentElement.style.getPropertyValue('--se-nav');
+  const toggle = document.querySelector<HTMLButtonElement>('#site-enhancer-nav-toggle')!;
+  assert.equal(width(), '88px');
+  assert.equal(toggle.hidden, true);
+  const home = document.querySelector('nav a')!;
+  home.insertAdjacentHTML('beforeend', '<span>首页</span>');
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(width(), '240px');
+  assert.equal(toggle.hidden, false);
+  home.querySelector('span')!.remove();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(width(), '88px');
+});

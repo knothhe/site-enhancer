@@ -78,7 +78,8 @@ ${SCOPE} [data-testid="sidebarColumn"]>div{width:100%!important;max-width:600px!
 ${SCOPE} [data-testid="sidebarColumn"]>div div:is(:has(form[role="search"]),:has([data-testid="trend"])){width:100%!important;max-width:none!important;box-sizing:border-box}
 ${SCOPE} [data-testid="sidebarColumn"]>div>div{position:static!important}
 ${SCOPE} [data-testid="sidebarColumn"] div:has(>form[role="search"]),${SCOPE} [data-testid="sidebarColumn"] div:has(form[role="search"]):not(:has([data-testid="trend"])){position:static!important;background:var(--se-x-bg,inherit)!important}
-${SCOPE} [data-testid="sidebarColumn"] div:has([data-testid="trend"])>div:has(form[role="search"]):not(:has([data-testid="trend"])){position:sticky!important;top:0!important;z-index:2;background:var(--se-x-bg,inherit)!important}
+${SCOPE} [data-testid="sidebarColumn"] div:has([data-testid="trend"])>div:has(form[role="search"]):not(:has([data-testid="trend"])){position:sticky!important;top:0!important;z-index:2;padding-bottom:8px!important;background:var(--se-x-bg,var(--se-native-bg,#fff))!important}
+${SCOPE} [data-testid="sidebarColumn"] div:has(> div form[role="search"]):has(> div ~ div [data-testid="trend"]) > :not(:has(form[role="search"])):not(:has([data-testid="trend"])){display:none!important}
 ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
 ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns [data-state="empty"]{display:none}
 /* X renders dialogs, menus, hover cards and toasts in #layers inside its z-index:0 app root; lift that root above the fixed panel while one is open. */
@@ -177,6 +178,7 @@ export function installXColumns(options: {
   const root = document.documentElement;
   const imageViewer = installXImageViewer();
   const videoViewer = installXVideoViewer();
+  let nativeCompact = false;
   let collapsed = false;
   let navToggle: HTMLButtonElement | undefined;
   try { collapsed = localStorage.getItem(COLUMNS_COLLAPSED_KEY) === 'true'; } catch { /* Optional preference. */ }
@@ -552,6 +554,7 @@ export function installXColumns(options: {
   }
   function renderToggle() {
     if (!navToggle) return;
+    navToggle.hidden = nativeCompact;
     navToggle.title = collapsed ? t.expandNav : t.collapseNav;
     navToggle.setAttribute('aria-label', navToggle.title);
     navToggle.setAttribute('aria-expanded', String(!collapsed));
@@ -608,6 +611,7 @@ export function installXColumns(options: {
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
     bodyObserver.observe(root, { attributes: true, attributeFilter: ['data-site-enhancer-x-theme', 'data-site-enhancer-x-tone'] });
     renderTheme();
+    syncNativeNav();
     let observedWidth: number | undefined;
     sizeObserver = new window.ResizeObserver(entries => {
       for (const entry of entries) {
@@ -621,6 +625,9 @@ export function installXColumns(options: {
     });
     sizeObserver.observe(root);
     headerObserver = new MutationObserver(records => {
+      if (records.some(record => (record.target as Element).closest?.('header[role="banner"]') ||
+        Array.from([...record.addedNodes, ...record.removedNodes]).some(node => node instanceof Element &&
+          (node.matches('header[role="banner"]') || node.querySelector('header[role="banner"]'))))) syncNativeNav();
       remarkSelection(records);
       if (measuredHeader?.isConnected || headerFrame !== undefined) return;
       const removedHeader = (measuredHeader ?? unmeasuredHeaderElements[0])?.isConnected === false;
@@ -723,18 +730,32 @@ export function installXColumns(options: {
     unmeasuredHeaderElements = measuredHeader ? [] : unmeasured;
     setHeaderHeight(height);
   }
+  function syncNativeNav() {
+    // X removes the home label at its viewport breakpoint. Compact CSS only hides it,
+    // so checking DOM text is independent of the width we assign to the banner.
+    const home = document.querySelector('header[role="banner"] nav a[href="/home"]');
+    const icon = home?.querySelector('svg');
+    // Ignore notification counts and accessible text inside the icon wrapper.
+    const hasLabel = home && Array.from(home.querySelectorAll('span')).some(span =>
+      span.textContent?.trim() && !icon?.closest('div')?.contains(span));
+    const compact = !!icon && !hasLabel;
+    if (nativeCompact !== compact) {
+      nativeCompact = compact;
+      renderWidths();
+    }
+  }
   function renderWidths(width?: number) {
     if (!panel) return;
     width ??= viewportWidth();
     renderedWidth = width;
-    const { nav, feed, detail } = columnGeometry(width, collapsed ? { ...widths, nav: 88 } : widths);
+    const { nav, feed, detail } = columnGeometry(width, collapsed || nativeCompact ? { ...widths, nav: 88 } : widths);
     root.style.setProperty('--se-nav', `${nav}px`);
     root.style.setProperty('--se-feed', `${feed}px`);
     root.style.setProperty('--se-detail', `${detail}px`);
     root.toggleAttribute('data-site-enhancer-compact-nav', nav < 180);
     renderToggle();
     dividers.forEach((divider, index) => {
-      divider.hidden = index === 0 && collapsed;
+      divider.hidden = index === 0 && (collapsed || nativeCompact);
       divider.style.left = `${index === 0 ? nav : nav + feed}px`;
       divider.setAttribute('aria-valuenow', String(index === 0 ? nav : feed));
       divider.setAttribute('aria-valuemin', index === 0 ? '88' : '360');
@@ -746,7 +767,7 @@ export function installXColumns(options: {
     const background = getComputedStyle(document.body).backgroundColor;
     const channels = background.match(/[\d.]+/g)?.slice(0, 3).map(Number);
     const dark = channels && channels.reduce((sum, value) => sum + value, 0) < 384 && background !== 'rgba(0, 0, 0, 0)';
-    panel.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
+    root.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
     panel.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
     panel.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
     navToggle?.style.setProperty('background', 'var(--se-x-bg,' + (background === 'rgba(0, 0, 0, 0)' ? '#fff' : background) + ')');
@@ -754,7 +775,7 @@ export function installXColumns(options: {
   }
   function adjust(kind: number, delta: number) {
     const width = viewportWidth();
-    const { nav, feed } = columnGeometry(width, collapsed ? { ...widths, nav: 88 } : widths);
+    const { nav, feed } = columnGeometry(width, collapsed || nativeCompact ? { ...widths, nav: 88 } : widths);
     if (kind === 0) { collapsed = false; widths.nav = Math.max(88, Math.min(280, nav + delta)); }
     else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(MAX_FEED, width - nav - 360, feed + delta)) / shareBasis(width - nav)));
     renderWidths(width);
@@ -799,13 +820,14 @@ export function installXColumns(options: {
     panel?.remove();
     panel = undefined;
     renderedWidth = undefined;
+    nativeCompact = false;
     frame = undefined;
     dividers.forEach(divider => divider.remove());
     dividers = [];
     localize = [];
     lastStatus = undefined;
     for (const name of ['data-site-enhancer-columns', 'data-site-enhancer-compact-nav', 'data-site-enhancer-resizing']) root.removeAttribute(name);
-    for (const name of ['--se-nav', '--se-feed', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
+    for (const name of ['--se-native-bg', '--se-nav', '--se-feed', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
   }
   function refresh() {
     if (disposed) return;
