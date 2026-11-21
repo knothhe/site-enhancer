@@ -36,7 +36,7 @@ test('X layer overlays lift the app root above the fixed detail panel only while
   assert.ok(Number(/z-index:(\d+)/.exec(lift)![1]) > Math.max(panelZ, toggleZ));
   // happy-dom mis-evaluates descendant combinators inside :has(), so the live match is verified in Chrome.
   assert.match(selector, /^#react-root>div:has\(>div>#layers :is\(/);
-  for (const overlay of ['[role="dialog"]', '[aria-modal="true"]', '[role="menu"]', '[role="listbox"]', '[role="alert"]', '[data-testid="HoverCard"]']) assert.ok(selector.includes(overlay), overlay);
+  for (const overlay of ['[role="alertdialog"]', 'dialog[open]', '[role="tooltip"]', '[data-testid="confirmationSheetDialog"]', '[data-testid="sheetDialog"]', '[data-testid="toast"]', '[role="dialog"]', '[aria-modal="true"]', '[role="menu"]', '[role="listbox"]', '[role="alert"]', '[data-testid="HoverCard"]']) assert.ok(selector.includes(overlay), overlay);
   assert.ok(!/GrokDrawer|chat-drawer/.test(selector), 'idle drawers never lift the app over the panel');
   assert.match(COLUMNS_CSS, /#layers :is\(\[data-testid="GrokDrawer"\],\[data-testid="chat-drawer-root"\],\[data-testid="DMDrawer"\]\)\{display:none!important\}/);
   assert.doesNotThrow(() => new win.CSSStyleSheet().replaceSync(COLUMNS_CSS));
@@ -1323,6 +1323,16 @@ test('Enter on a keyboard-focused post opens details instead of navigating the t
   columns!.setEnabled(false);
   assert.equal(key(article, { key: 'Enter' }).defaultPrevented, false);
 });
+test('Escape leaves details open while X shows an alertdialog', () => {
+  start();
+  key(document.querySelector<HTMLElement>('article')!, { key: 'Enter' });
+  const frame = document.querySelector('iframe');
+  assert.ok(frame);
+  document.body.insertAdjacentHTML('beforeend', '<div id="layers"><div role="alertdialog"></div></div>');
+  assert.equal(key(document.body, { key: 'Escape' }).defaultPrevented, false);
+  assert.equal(document.querySelector('iframe'), frame);
+});
+
 test('Escape closes details and returns focus, but leaves editors, menus and viewers alone', t => {
   start();
   const article = document.querySelector<HTMLElement>('article')!;

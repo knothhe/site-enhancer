@@ -116,9 +116,12 @@ export function readCachedXStyle(): XStyle {
   }
 }
 
+const X_MODAL_SELECTOR = '[aria-modal="true"],[role="alertdialog"],[data-testid="confirmationSheetDialog"],[data-testid="sheetDialog"]';
+export const X_OVERLAY_SELECTOR = X_MODAL_SELECTOR + ',dialog[open],[role="dialog"],[role="menu"],[role="listbox"],[role="alert"],[role="tooltip"],[data-testid="HoverCard"],[data-testid="toast"]';
+
 /** X opens compose, quote and other dialogs as routes while the previous page stays rendered underneath. */
 export function isXOverlayRoute(pathname: string, doc: Document = document) {
-  return pathname.startsWith('/compose/') || !!doc.querySelector('#layers [aria-modal="true"]');
+  return pathname.startsWith('/compose/') || !!doc.querySelector(`#layers :is(${X_MODAL_SELECTOR})`);
 }
 
 /** Installs the stylesheet and returns setters for the active style and current page. */

@@ -103,6 +103,9 @@ test('compose routes and open modal dialogs count as overlays over the current p
   assert.equal(isXOverlayRoute('/composer'), false);
   document.body.innerHTML = '<div id="layers"><div role="menu"></div></div>';
   assert.equal(isXOverlayRoute('/alice/status/1/likes'), false);
+  document.getElementById('layers')!.innerHTML = '<div role="alertdialog"></div>';
+  assert.equal(isXOverlayRoute('/home'), true);
+  document.getElementById('layers')!.innerHTML = '';
   document.getElementById('layers')!.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');
   assert.equal(isXOverlayRoute('/alice/status/1/likes'), true);
 });

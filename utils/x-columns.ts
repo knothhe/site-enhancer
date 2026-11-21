@@ -4,7 +4,7 @@ import { installXVideoViewer } from './x-video-viewer.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
 import { resolveLocale, type Locale } from './i18n.ts';
-import { isXOverlayRoute } from './x-style.ts';
+import { isXOverlayRoute, X_OVERLAY_SELECTOR } from './x-style.ts';
 /** Three-column layout. The timeline remains owned by X; details use a same-origin frame. */
 export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
@@ -83,7 +83,7 @@ ${SCOPE} [data-testid="sidebarColumn"] div:has(> div form[role="search"]):has(> 
 ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
 ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns [data-state="empty"]{display:none}
 /* X renders dialogs, menus, hover cards and toasts in #layers inside its z-index:0 app root; lift that root above the fixed panel while one is open. */
-${SCOPE} #react-root>div:has(>div>#layers :is([role="dialog"],[aria-modal="true"],[role="menu"],[role="listbox"],[role="alert"],[data-testid="HoverCard"])){z-index:6!important}
+${SCOPE} #react-root>div:has(>div>#layers :is(${X_OVERLAY_SELECTOR})){z-index:6!important}
 /* The bottom-right drawers sit under the detail panel and would only flash over it while the app root is lifted. */
 ${SCOPE} #layers :is([data-testid="GrokDrawer"],[data-testid="chat-drawer-root"],[data-testid="DMDrawer"]){display:none!important}
 ${SCOPE} [data-site-enhancer-selected]{box-shadow:inset 2px 0 color-mix(in srgb,var(--se-x-accent,#1d9bf0) 55%,transparent);background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 4%,transparent)!important}
@@ -366,7 +366,6 @@ export function installXColumns(options: {
     options.releaseDetail?.();
   }
   const tweet = 'article[data-testid="tweet"]';
-  const overlay = '[role="dialog"],dialog[open],[aria-modal="true"],[role="menu"],[role="listbox"]';
   function hover(event: PointerEvent) {
     const article = (event.target as Element)?.closest?.(tweet);
     if (!article?.closest(PRIMARY_COLUMN) || article.contains(event.relatedTarget as Node | null)) return;
@@ -376,7 +375,7 @@ export function installXColumns(options: {
     hoverArticle = article;
     hoverTimer = setTimeout(() => {
       const url = detailUrl(postPermalink(article) ?? '', location.origin);
-      if (!url || !selected || !panel || loadingFrame || !article.isConnected || readyFrames.has(url) || document.querySelector(overlay)) return;
+      if (!url || !selected || !panel || loadingFrame || !article.isConnected || readyFrames.has(url) || document.querySelector(X_OVERLAY_SELECTOR)) return;
       const current = makeFrame();
       current.hidden = true;
       hoverFrame = { url, frame: current };
@@ -394,7 +393,7 @@ export function installXColumns(options: {
     if (!selected || !article.matches?.(tweet) || !article.closest(PRIMARY_COLUMN) || article.isContentEditable) return;
     followTimer = setTimeout(() => {
       const url = detailUrl(postPermalink(article) ?? '', location.origin);
-      if (selected && url && url !== selected && article === document.activeElement && !document.querySelector(overlay)) {
+      if (selected && url && url !== selected && article === document.activeElement && !document.querySelector(X_OVERLAY_SELECTOR)) {
         returnFocus = article;
         history.select(url);
       }
@@ -888,7 +887,7 @@ export function installXColumns(options: {
       (event.key === '[' || event.key === ']')) {
       const target = event.target as HTMLElement;
       if (!target.closest || target.isContentEditable || target.closest('input,textarea,select,[contenteditable="true"]') ||
-        document.querySelector(overlay) || target.ownerDocument.querySelector(overlay)) return;
+        document.querySelector(X_OVERLAY_SELECTOR) || target.ownerDocument.querySelector(X_OVERLAY_SELECTOR)) return;
       let destination: HTMLElement | undefined;
       if (event.key === ']' && target.ownerDocument === document && target.closest(PRIMARY_COLUMN) && frame) {
         const articles = frameDocuments.get(frame)?.querySelectorAll<HTMLElement>(PRIMARY_COLUMN + ' article[data-testid="tweet"]');
@@ -927,8 +926,7 @@ export function installXColumns(options: {
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"],[role="menu"],[role="listbox"],dialog')) return;
     const source = target?.ownerDocument ?? document;
-    const overlay = 'dialog[open],[aria-modal="true"],[role="menu"],[role="listbox"]';
-    if (document.querySelector(overlay) || (source !== document && source.querySelector(overlay))) return;
+    if (document.querySelector(X_OVERLAY_SELECTOR) || (source !== document && source.querySelector(X_OVERLAY_SELECTOR))) return;
     event.preventDefault();
     history.select(undefined);
     if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
