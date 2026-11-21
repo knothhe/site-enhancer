@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
 import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS } from '../utils/x-columns.ts';
 
+import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
 
 let win: Window;
@@ -169,6 +170,33 @@ test('a feed video the user plays over details is not paused back, avoiding a pl
   selectDetail(456);
   assert.equal(feed.video.paused, true, 'opening another post pauses the feed again');
   feed.play(); assert.equal(feed.video.paused, true);
+});
+
+test('blocked feed autoplay is refused at play() so X cannot loop play/pause', async t => {
+  // Stand in for the browser's play(): start the helper's playback for that video.
+  const proto = win.HTMLMediaElement.prototype as unknown as { play: (this: HTMLMediaElement & { start?: () => void }) => Promise<void> };
+  proto.play = function () { this.start?.(); return Promise.resolve(); };
+  installVideoPlayGate(win as unknown as Parameters<typeof installVideoPlayGate>[0]);
+  t.after(() => (win as unknown as { __seVideoGateCleanup?: () => void }).__seVideoGateCleanup?.());
+  const gated = () => { const entry = addVideo(); Object.assign(entry.video, { start: entry.play }); return entry; };
+  const autoplay = gated(); start();
+  await autoplay.video.play();
+  assert.equal(autoplay.video.paused, false, 'autoplay is untouched without details');
+  selectDetail(123);
+  const pauses = autoplay.pauses();
+  // X's autoplay controller keeps asking; each request is refused before playback starts.
+  for (let i = 0; i < 3; i++) {
+    await assert.rejects(autoplay.video.play(), (error: DOMException) => error.name === 'NotAllowedError');
+  }
+  assert.equal(autoplay.video.paused, true);
+  assert.equal(autoplay.pauses(), pauses, 'no pause fights the refused requests');
+  const chosen = gated();
+  chosen.player.dispatchEvent(new win.PointerEvent('pointerdown', { bubbles: true }) as unknown as Event);
+  await chosen.video.play();
+  assert.equal(chosen.video.paused, false, 'a video the user starts still plays');
+  click('.se-column-toolbar button[aria-label="关闭"]');
+  await autoplay.video.play();
+  assert.equal(autoplay.video.paused, false, 'closing details lifts the gate');
 });
 
 test('video expansion keeps the original node and source, then restores focus and page interaction', () => {

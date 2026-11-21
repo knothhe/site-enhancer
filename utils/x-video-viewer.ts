@@ -1,4 +1,5 @@
 import { resolveLocale } from './i18n.ts';
+import { VIDEO_PLAY_REQUEST } from './x-video-gate.ts';
 
 const PRIMARY_TEST_ID = 'primaryColumn';
 const PLAYER_TEST_ID = 'videoPlayer';
@@ -209,13 +210,22 @@ export function installXVideoViewer() {
       const player = (event.target as Element | null)?.closest?.<HTMLElement>(PLAYER);
       if (player) chosen = player;
     }
+    function refused(video: HTMLVideoElement) {
+      return !exempt(video, doc) && (blocked(doc) || !!expanded);
+    }
+    function request(event: Event) {
+      // Refuse X's play() call up front (see x-video-gate.ts); pausing after the play
+      // event only makes X call play() again in a loop.
+      const video = event.target as HTMLVideoElement;
+      if (video.tagName === 'VIDEO' && refused(video)) event.preventDefault();
+    }
     function play(event: Event) {
       const video = event.target as HTMLVideoElement;
       if (video.tagName !== 'VIDEO') return;
       if (exempt(video, doc)) {
         // Keep a single audible video across the timeline and detail documents.
         if (!expanded) documents.forEach((_entry, other) => { if (other !== doc) pauseVideos(other); });
-      } else if (blocked(doc) || expanded) video.pause();
+      } else if (refused(video)) video.pause();
     }
     const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {
@@ -224,6 +234,7 @@ export function installXVideoViewer() {
       observer.disconnect();
       doc.removeEventListener('click', click, true);
       doc.removeEventListener('play', play, true);
+      doc.removeEventListener(VIDEO_PLAY_REQUEST, request, true);
       doc.removeEventListener('pointerdown', gesture, true);
       doc.removeEventListener('keydown', gesture, true);
       players.forEach(({ button }) => button.remove());
@@ -234,6 +245,7 @@ export function installXVideoViewer() {
     });
     doc.addEventListener('click', click, true);
     doc.addEventListener('play', play, true);
+    doc.addEventListener(VIDEO_PLAY_REQUEST, request, true);
     doc.addEventListener('pointerdown', gesture, true);
     doc.addEventListener('keydown', gesture, true);
     doc.querySelectorAll<HTMLElement>(POST_PLAYER).forEach(syncPlayer);
