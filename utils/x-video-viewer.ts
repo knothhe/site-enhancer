@@ -1,5 +1,5 @@
 import { resolveLocale } from './i18n.ts';
-import { VIDEO_PLAY_REQUEST } from './x-video-gate.ts';
+import { installXVideoPlayback } from './x-video-playback.ts';
 
 const PRIMARY_TEST_ID = 'primaryColumn';
 const PLAYER_TEST_ID = 'videoPlayer';
@@ -31,10 +31,6 @@ export function installXVideoViewer() {
   const documents = new Map<Document, { dispose: () => void; frame?: HTMLIFrameElement }>();
   let feedPaused = false;
   let expanded: { player: HTMLElement; close: () => void } | undefined;
-  // The player the user last pressed or keyed. X calls play() again whenever a video the
-  // user started is paused by someone else, so blocking that play loops play/pause every
-  // millisecond: audio stutters and crackles. Only autoplay is blocked.
-  let chosen: HTMLElement | undefined;
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
     ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看' }
     : { expand: 'Expand video', close: 'Close video · Esc', title: 'Video viewer' };
@@ -42,16 +38,11 @@ export function installXVideoViewer() {
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
   }
-  function exempt(video: HTMLVideoElement, doc: Document) {
-    if (expanded) return expanded.player.contains(video);
-    return !!chosen?.contains(video) && (doc === document || !blocked(doc));
-  }
-  function pauseVideos(doc: Document) {
-    if (chosen?.ownerDocument === doc && chosen !== expanded?.player) chosen = undefined;
-    for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) {
-      if (!video.paused && !expanded?.player.contains(video)) video.pause();
-    }
-  }
+  const playback = installXVideoPlayback({
+    blocked,
+    hidden: doc => doc !== document && blocked(doc),
+    expanded: () => expanded?.player,
+  });
   function close() { expanded?.close(); }
 
   function open(player: HTMLElement, button: HTMLButtonElement, frame?: HTMLIFrameElement) {
@@ -83,7 +74,7 @@ export function installXVideoViewer() {
       player.removeEventListener('toggle', toggle);
       button.querySelector('span')!.textContent = labels().expand;
       button.setAttribute('aria-expanded', 'false');
-      if (blocked(doc)) pauseVideos(doc);
+      if (blocked(doc)) playback.pause(doc);
       if (focus?.isConnected) focus.focus({ preventScroll: true });
     }
     function keydown(event: KeyboardEvent) {
@@ -110,7 +101,7 @@ export function installXVideoViewer() {
     player.setAttribute(EXPANDED, '');
     frame?.setAttribute(FRAME, '');
     try { player.showPopover(); } catch { restore(); return; }
-    documents.forEach((_entry, other) => pauseVideos(other));
+    documents.forEach((_entry, other) => playback.pause(other));
     isolate(player);
     if (frame) isolate(frame);
     doc.addEventListener('keydown', keydown, true);
@@ -157,7 +148,6 @@ export function installXVideoViewer() {
     function syncChanges(records: MutationRecord[]) {
       if (expanded?.player.ownerDocument === doc && !expanded.player.isConnected) close();
       const changed = new Set<HTMLElement>();
-      const pauseAdded = blocked(doc);
       let elementsRemoved = false;
       function collectMedia(element: HTMLElement) {
         if (element.matches(PLAYER)) changed.add(element);
@@ -166,7 +156,7 @@ export function installXVideoViewer() {
         if (player) changed.add(player);
         const video = element as HTMLVideoElement;
         // A video may have started before its play event could reach this document.
-        if (pauseAdded && doc.contains(video) && !video.paused && !exempt(video, doc)) video.pause();
+        if (doc.contains(video)) playback.settle(video);
       }
       for (const { type, target, oldValue, addedNodes, removedNodes } of records) {
         if (type === 'attributes') {
@@ -206,37 +196,11 @@ export function installXVideoViewer() {
       event.preventDefault(); event.stopImmediatePropagation();
       if (expanded?.player === player) close(); else open(player, button, frame);
     }
-    function gesture(event: Event) {
-      const player = (event.target as Element | null)?.closest?.<HTMLElement>(PLAYER);
-      if (player) chosen = player;
-    }
-    function refused(video: HTMLVideoElement) {
-      return !exempt(video, doc) && (blocked(doc) || !!expanded);
-    }
-    function request(event: Event) {
-      // Refuse X's play() call up front (see x-video-gate.ts); pausing after the play
-      // event only makes X call play() again in a loop.
-      const video = event.target as HTMLVideoElement;
-      if (video.tagName === 'VIDEO' && refused(video)) event.preventDefault();
-    }
-    function play(event: Event) {
-      const video = event.target as HTMLVideoElement;
-      if (video.tagName !== 'VIDEO') return;
-      if (exempt(video, doc)) {
-        // Keep a single audible video across the timeline and detail documents.
-        if (!expanded) documents.forEach((_entry, other) => { if (other !== doc) pauseVideos(other); });
-      } else if (refused(video)) video.pause();
-    }
     const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {
       if (expanded?.player.ownerDocument === doc) close();
-      if (chosen?.ownerDocument === doc) chosen = undefined;
       observer.disconnect();
       doc.removeEventListener('click', click, true);
-      doc.removeEventListener('play', play, true);
-      doc.removeEventListener(VIDEO_PLAY_REQUEST, request, true);
-      doc.removeEventListener('pointerdown', gesture, true);
-      doc.removeEventListener('keydown', gesture, true);
       players.forEach(({ button }) => button.remove());
       style.remove();
     } });
@@ -244,29 +208,36 @@ export function installXVideoViewer() {
       childList: true, subtree: true, attributes: true, attributeFilter: ['data-testid'], attributeOldValue: true,
     });
     doc.addEventListener('click', click, true);
-    doc.addEventListener('play', play, true);
-    doc.addEventListener(VIDEO_PLAY_REQUEST, request, true);
-    doc.addEventListener('pointerdown', gesture, true);
-    doc.addEventListener('keydown', gesture, true);
     doc.querySelectorAll<HTMLElement>(POST_PLAYER).forEach(syncPlayer);
-    if (blocked(doc)) pauseVideos(doc);
+    if (blocked(doc)) playback.pause(doc);
+    playback.attach(doc);
   }
   return {
     attach,
-    detach(doc: Document) { documents.get(doc)?.dispose(); documents.delete(doc); },
+    /** Single playback and the shared volume also apply while the window is too narrow for three columns. */
+    setPlayback(value: boolean) {
+      if (value) playback.attach(document); else playback.remove();
+    },
+    detach(doc: Document) {
+      documents.get(doc)?.dispose(); documents.delete(doc);
+      if (doc !== document) playback.detach(doc);
+    },
     close,
     setFeedPaused(value: boolean) {
       feedPaused = value;
       if (value) {
         if (expanded?.player.ownerDocument === document) close();
-        pauseVideos(document);
+        playback.pause(document);
       }
     },
     remove() {
       close();
-      documents.forEach(entry => entry.dispose()); documents.clear();
+      for (const [doc, entry] of documents) {
+        entry.dispose();
+        if (doc !== document) playback.detach(doc);
+      }
+      documents.clear();
       feedPaused = false;
-      chosen = undefined;
     },
   };
 }

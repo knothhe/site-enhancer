@@ -186,7 +186,7 @@ test('blocked feed autoplay is refused at play() so X cannot loop play/pause', a
   const pauses = autoplay.pauses();
   // X's autoplay controller keeps asking; each request is refused before playback starts.
   for (let i = 0; i < 3; i++) {
-    await assert.rejects(autoplay.video.play(), (error: DOMException) => error.name === 'NotAllowedError');
+    await assert.rejects(autoplay.video.play(), (error: DOMException) => error.name === 'AbortError');
   }
   assert.equal(autoplay.video.paused, true);
   assert.equal(autoplay.pauses(), pauses, 'no pause fights the refused requests');
@@ -195,6 +195,8 @@ test('blocked feed autoplay is refused at play() so X cannot loop play/pause', a
   await chosen.video.play();
   assert.equal(chosen.video.paused, false, 'a video the user starts still plays');
   click('.se-column-toolbar button[aria-label="关闭"]');
+  await assert.rejects(autoplay.video.play(), 'autoplay never interrupts a video the user started');
+  chosen.video.pause();
   await autoplay.video.play();
   assert.equal(autoplay.video.paused, false, 'closing details lifts the gate');
 });

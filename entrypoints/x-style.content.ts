@@ -2,6 +2,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { DETAIL_FRAME_CSS, DETAIL_FRAME_NAME, installXColumns } from '../utils/x-columns';
 import { installXStyle, isXOverlayRoute } from '../utils/x-style';
 import { installXTheme } from '../utils/x-theme';
+import { holdPreloadedAutoplay } from '../utils/x-video-gate';
 import { xStyleSetting, xThemeSetting } from '../utils/x-settings';
 
 export default defineContentScript({
@@ -21,6 +22,7 @@ export default defineContentScript({
       frameStyle.textContent = DETAIL_FRAME_CSS;
       (document.head ?? document.documentElement).append(frameStyle);
       ctx.onInvalidated(() => frameStyle.remove());
+      ctx.onInvalidated(holdPreloadedAutoplay(window));
       ctx.onInvalidated(observeDetailReady(document, () => {
         window.parent.postMessage({ type: DETAIL_READY_MESSAGE }, location.origin);
       }));

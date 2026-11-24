@@ -953,7 +953,7 @@ export function installXColumns(options: {
   window.addEventListener('storage', storage);
   window.addEventListener('message', detailReady);
   return {
-    setEnabled(value: boolean) { enabled = value; refresh(); },
+    setEnabled(value: boolean) { enabled = value; videoViewer.setPlayback(value); refresh(); },
     onNavigate() {
       // Dialog routes such as quote and compose keep the timeline underneath, so keep its detail too.
       if (panel && !history.restore() && !isXOverlayRoute(location.pathname)) closeDetail(false);
@@ -962,6 +962,7 @@ export function installXColumns(options: {
     },
     remove() {
       disposed = true;
+      videoViewer.setPlayback(false);
       langObserver.disconnect();
       unmount();
       sheet.remove();
