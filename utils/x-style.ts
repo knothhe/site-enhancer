@@ -39,6 +39,7 @@ const focus = `:root[${X_STYLE_ATTR}="reading"]`;
 
 const home = `[${X_PAGE_ATTR}="home"]`;
 const cell = '[data-testid="cellInnerDiv"]';
+const webPromotedRow = `${clean}[data-app-version] li[data-index]:has(article):not(:has(a[href*="/status/"][data-base-ui-tooltip-trigger]))`;
 const sidebar = '[data-testid="sidebarColumn"]';
 
 // Selectors rely on hrefs and data-testid values, which do not change with the UI language.
@@ -49,11 +50,12 @@ const navUpsells = [
 ].join(',');
 
 export const X_STYLE_CSS = `
+/* X's virtual list keeps its estimated row height when it measures zero. */
+${webPromotedRow} { min-height: 1px !important; }
 ${clean}[data-app-version] [data-rail-overflow] :is(${navUpsells}),
 ${clean}[data-app-version] :is([data-slot="xds-dock"],[data-who-to-follow],aside nav,aside section:has([data-who-to-follow]),aside section:has(a[href^="/i/premium"]),article button:has(svg[data-icon="icon-logo-grok"])),
 ${clean}[data-app-version]:not([data-site-enhancer-columns]) aside section:has([id^="urt:explore-sidebar"]),
-/* Hide the row's content, not the row: a ResizeObserver need not report a 0x0 box, and the virtualized list would keep a gap. */
-${clean}[data-app-version] li[data-index]:has(article):not(:has(a[href*="/status/"][data-base-ui-tooltip-trigger])) > *,
+${webPromotedRow} > *,
 ${focus}[data-app-version] :is(main + aside,article a[href$="/analytics"]),
 ${clean} header[role="banner"] :is(${navUpsells}),
 ${clean} [data-testid="GrokDrawer"],
