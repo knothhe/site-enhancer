@@ -1,3 +1,4 @@
+import { PRIMARY, POST } from './x-dom.ts';
 import { toCanvas } from 'html-to-image';
 
 /** Only attach the page's focal post when capturing a reply below it. */
@@ -5,8 +6,8 @@ export function screenshotPosts(tweet: HTMLElement, permalink: (node: Element) =
   const doc = tweet.ownerDocument;
   const id = doc.location.pathname.match(/^\/(?:\w+|i\/web)\/status\/(\d+)(?:\/|$)/)?.[1];
   if (!id) return [tweet];
-  const scope = tweet.closest('[data-testid="primaryColumn"]') ?? doc;
-  const posts = Array.from(scope.querySelectorAll<HTMLElement>('article[data-testid="tweet"]'));
+  const scope = tweet.closest(PRIMARY) ?? doc;
+  const posts = Array.from(scope.querySelectorAll<HTMLElement>(POST));
   const parent = posts.find(post => permalink(post).match(/\/status\/(\d+)$/)?.[1] === id);
   return parent && parent !== tweet && posts.indexOf(parent) < posts.indexOf(tweet) ? [parent, tweet] : [tweet];
 }

@@ -1,10 +1,9 @@
+import { POST as TWEET, TEXT, MENU_TRIGGER as CARET, TIMESTAMP } from './x-dom.ts';
 import { showScreenshotPreview } from './x-screenshot-preview.ts';
 import { renderPostScreenshot, screenshotPosts } from './x-screenshot.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { createToast } from './toast.ts';
 
-const TWEET = '[data-testid="tweet"]';
-const CARET = '[data-testid="caret"]';
 const ITEM = 'site-enhancer-menuitem';
 const MENU = 'site-enhancer-menu';
 const HEIGHT = 'site-enhancer-menu-height';
@@ -20,25 +19,26 @@ function belongsToTweet(element: Element, tweet: Element): boolean {
   const quote = element.parentElement?.closest('[role="link"], a[href*="/status/"]');
   if (quote && tweet.contains(quote)) return false;
   return !element.matches('[role="link"], a[href*="/status/"]')
-    || !element.querySelector('[data-testid="tweetText"]');
+    || !element.querySelector(TEXT);
 }
 
 function readText(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
   if (!(node instanceof Element)) return '';
+  if (node.tagName === 'BUTTON') return '';
   if (node.tagName === 'BR') return '\n';
   if (node.tagName === 'IMG') return node.getAttribute('alt') ?? '';
   return Array.from(node.childNodes, readText).join('');
 }
 
 export function getTweetData(tweet: Element): { text: string; url: string } {
-  const textElement = Array.from(tweet.querySelectorAll('[data-testid="tweetText"]'))
+  const textElement = Array.from(tweet.querySelectorAll(TEXT))
     .find(element => belongsToTweet(element, tweet));
   const text = textElement ? readText(textElement).trim() : '';
   const links = Array.from(tweet.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'))
     .filter(link => belongsToTweet(link, tweet));
   // The timestamp is the primary permalink; media/analytics links are fallbacks.
-  links.sort((a, b) => Number(!!b.querySelector('time')) - Number(!!a.querySelector('time')));
+  links.sort((a, b) => Number(b.matches(TIMESTAMP)) - Number(a.matches(TIMESTAMP)));
   for (const link of links) {
     let url: URL;
     try {
@@ -103,6 +103,13 @@ export function installXCopyMenu(): () => void {
     session = undefined;
   }
 
+  function dismiss(current: Session) {
+    if (current.trigger.hasAttribute('data-slot')) {
+      current.menu?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    } else current.trigger.click();
+    reset();
+  }
+
   function createItem(kind: 'link' | 'text' | 'url' | 'image', current: Session) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -119,7 +126,7 @@ export function installXCopyMenu(): () => void {
         if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(labels.failed); return; }
         const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
         const png = renderPostScreenshot(posts);
-        current.trigger.click(); reset();
+        dismiss(current);
         closePreview?.();
         closePreview = showScreenshotPreview(document, png, current.trigger);
         return;
@@ -130,8 +137,7 @@ export function installXCopyMenu(): () => void {
       const value = kind === 'text' ? text : kind === 'url' ? url : [text, url, '#X'].filter(Boolean).join('\n');
       // Start the write within the user gesture before closing the native menu.
       const result = copyToClipboard(value);
-      current.trigger.click();
-      reset();
+      dismiss(current);
       current.trigger.focus({ preventScroll: true });
       const success = await result;
       if (!disposed) toast.show(success ? labels.copied : labels.failed);
@@ -160,7 +166,7 @@ export function installXCopyMenu(): () => void {
     if (menu.style.maxHeight !== maxHeight) menu.style.maxHeight = maxHeight;
     const dropdown = menu.querySelector('[data-testid="Dropdown"]') ?? menu;
     // Native opening animations fix the wrapper height to the original items.
-    for (let parent = dropdown.parentElement; parent && parent !== menu; parent = parent.parentElement) {
+    for (let parent = dropdown === menu ? null : dropdown.parentElement; parent && parent !== menu; parent = parent.parentElement) {
       if (parent.style.height && !parent.classList.contains(HEIGHT)) {
         parent.classList.add(HEIGHT);
         current.heights.push(parent);
@@ -196,11 +202,18 @@ export function installXCopyMenu(): () => void {
     session.timer = setTimeout(() => { if (!session?.menu) reset(); }, 2000);
   }
 
+  // Base UI opens on pointer-down, before click capture sees the portal.
+  function onPointerDown(event: PointerEvent) {
+    if (event.button !== 0 || !(event.target instanceof Element)) return;
+    const trigger = event.target.closest<HTMLElement>(CARET);
+    if (trigger?.hasAttribute('data-slot')) start(trigger);
+  }
+
   function onClick(event: MouseEvent) {
     if (!(event.target instanceof Element)) return;
     const trigger = event.target.closest<HTMLElement>(CARET);
     // A keyboard activation already started this session from keydown.
-    if (trigger && event.detail === 0 && session?.trigger === trigger) return;
+    if (trigger && session?.trigger === trigger && (event.detail === 0 || trigger.hasAttribute('data-slot'))) return;
     if (trigger) { start(trigger); return; }
     if (!session?.menu?.contains(event.target)) reset();
   }
@@ -237,6 +250,7 @@ export function installXCopyMenu(): () => void {
     items[next]?.focus();
   }
 
+  document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKeyDown, true);
   window.addEventListener('popstate', reset);
@@ -245,6 +259,7 @@ export function installXCopyMenu(): () => void {
     disposed = true;
     closePreview?.();
     reset();
+    document.removeEventListener('pointerdown', onPointerDown, true);
     document.removeEventListener('click', onClick, true);
     document.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('popstate', reset);

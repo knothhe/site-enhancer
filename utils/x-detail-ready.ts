@@ -1,8 +1,5 @@
+import { PRIMARY, PRIMARY_POST as READY_TWEET, POST as TWEET } from './x-dom.ts';
 export const DETAIL_READY_MESSAGE = 'site-enhancer:x-detail-ready';
-
-const PRIMARY = '[data-testid="primaryColumn"]';
-const TWEET = '[data-testid="tweet"]';
-const READY_TWEET = `${PRIMARY} ${TWEET}`;
 
 /** Notify the owner as soon as React renders post content, without waiting for media or window.load. */
 export function observeDetailReady(doc: Document, ready: () => void) {

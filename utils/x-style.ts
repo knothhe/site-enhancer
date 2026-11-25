@@ -1,3 +1,4 @@
+import { WEB, TEXT, preserveWebStyles } from './x-dom.ts';
 import type { Locale } from './i18n';
 
 export const X_STYLES = ['original', 'clean', 'columns', 'reading'] as const;
@@ -48,6 +49,12 @@ const navUpsells = [
 ].join(',');
 
 export const X_STYLE_CSS = `
+${clean}[data-app-version] [data-rail-overflow] :is(${navUpsells}),
+${clean}[data-app-version] :is([data-slot="xds-dock"],[data-who-to-follow],aside nav,aside section:has([data-who-to-follow]),aside section:has(a[href^="/i/premium"]),article button:has(svg[data-icon="icon-logo-grok"])),
+${clean}[data-app-version]:not([data-site-enhancer-columns]) aside section:has([id^="urt:explore-sidebar"]),
+/* Hide the row's content, not the row: a ResizeObserver need not report a 0x0 box, and the virtualized list would keep a gap. */
+${clean}[data-app-version] li[data-index]:has(article):not(:has(a[href*="/status/"][data-base-ui-tooltip-trigger])) > *,
+${focus}[data-app-version] :is(main + aside,article a[href$="/analytics"]),
 ${clean} header[role="banner"] :is(${navUpsells}),
 ${clean} [data-testid="GrokDrawer"],
 ${clean} [data-testid="tweet"] button[aria-label*="Grok" i],
@@ -84,21 +91,22 @@ ${focus} [data-testid="primaryColumn"] .r-1ye8kvj:has(> section) {
   max-width: none !important;
 }
 
+${WEB}[data-site-enhancer-x="reading"] div.grid:has(> main + aside){grid-template-columns:minmax(0,720px)!important;justify-content:center;--x-main-column-width:720px;--x-timeline-max-width:720px}
 /* Typography only; colors belong to x-theme.ts. */
-${clean} [data-testid="tweetText"] {
+${clean} article :is(${TEXT}) {
   line-height: 1.55 !important;
 }
 ${clean} [data-testid="tweet"] :is([data-testid="tweetPhoto"], [data-testid="card.wrapper"]),
 ${clean} [data-testid="tweet"] div:has(> [data-testid="tweetPhoto"]) {
   border-radius: 14px;
 }
-${focus} [data-testid="tweetText"] {
+${focus} article :is(${TEXT}) {
   font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", Georgia, serif !important;
   font-size: 17px !important;
   line-height: 1.7 !important;
   letter-spacing: .01em;
 }
-${focus} [data-testid="tweetText"] * {
+${focus} article :is(${TEXT}) * {
   font-family: inherit !important;
 }
 ${focus} [data-testid="tweet"] {
@@ -125,7 +133,7 @@ export function isXOverlayRoute(pathname: string, doc: Document = document) {
 }
 
 /** Installs the stylesheet and returns setters for the active style and current page. */
-export function installXStyle(initial: XStyle = readCachedXStyle()) {
+export function installXStyle(initial: XStyle = readCachedXStyle(), detail = false) {
   const root = document.documentElement;
   // Replace any element left by a previous extension instance; see remove().
   document.getElementById(STYLE_ID)?.remove();
@@ -135,17 +143,27 @@ export function installXStyle(initial: XStyle = readCachedXStyle()) {
   // At document_start <head> may not exist yet.
   (document.head ?? root).appendChild(style);
 
+  let styleValue = initial;
+  let homePage = location.pathname === '/home';
+  function restore() {
+    const desired = detail ? 'clean' : styleValue;
+    if (desired === 'original') root.removeAttribute(X_STYLE_ATTR);
+    else if (root.getAttribute(X_STYLE_ATTR) !== desired) root.setAttribute(X_STYLE_ATTR, desired);
+    if (!homePage) root.removeAttribute(X_PAGE_ATTR);
+    else if (root.getAttribute(X_PAGE_ATTR) !== 'home') root.setAttribute(X_PAGE_ATTR, 'home');
+  }
+  const stopRepairs = preserveWebStyles([style], [X_STYLE_ATTR, X_PAGE_ATTR], restore);
   function setStyle(value: XStyle) {
-    if (value === 'original') root.removeAttribute(X_STYLE_ATTR);
-    else root.setAttribute(X_STYLE_ATTR, value);
+    styleValue = value;
+    restore();
     try {
       localStorage.setItem(X_STYLE_CACHE_KEY, value);
     } catch { /* Storage may be blocked; the extension setting remains the source of truth. */ }
   }
 
   function setPage(pathname: string) {
-    if (pathname === '/home') root.setAttribute(X_PAGE_ATTR, 'home');
-    else root.removeAttribute(X_PAGE_ATTR);
+    homePage = pathname === '/home';
+    restore();
   }
 
   setStyle(initial);
@@ -154,6 +172,7 @@ export function installXStyle(initial: XStyle = readCachedXStyle()) {
     setStyle,
     setPage,
     remove() {
+      stopRepairs();
       // A newer instance that replaced this stylesheet now owns the page state.
       if (!style.isConnected) return;
       style.remove();

@@ -1,3 +1,4 @@
+import { POST, PHOTO, PHOTO_IMAGE } from './x-dom.ts';
 import { createImageMotion } from './x-image-motion.ts';
 import { resolveLocale } from './i18n.ts';
 import { imageToPng } from './image-clipboard.ts';
@@ -580,17 +581,19 @@ export function installXImageViewer() {
       if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return false;
       const target = event.target as Element | null;
       if (!target || target.nodeType !== 1) return false;
-      const photo = target.closest('[data-testid="tweetPhoto"]');
-      const article = photo?.closest('article[data-testid="tweet"]');
+      const photo = target.closest(PHOTO);
+      const article = photo?.closest(POST);
       if (!photo || !article || photo.closest('video,[data-testid="videoPlayer"]') || photo.querySelector('video')) return false;
       const link = photo.closest('a');
       if (link?.target === '_blank' || link?.hasAttribute('download')) return false;
       const group = photo.closest('[role="link"]:not(a)') ?? article;
-      const images = Array.from(group.querySelectorAll<HTMLImageElement>('[data-testid="tweetPhoto"] img')).filter(img => {
-        if ((img.closest('[role="link"]:not(a)') ?? img.closest('article[data-testid="tweet"]')) !== group) return false;
+      const mediaTile = (img: Element) => img.closest('a[href*="/photo/"],div:has(> a[href*="/photo/"])');
+      const images = Array.from(group.querySelectorAll<HTMLImageElement>(PHOTO_IMAGE)).filter(img => {
+        if ((img.closest('[role="link"]:not(a)') ?? img.closest(POST)) !== group) return false;
+        if (!img.closest('[data-testid="tweetPhoto"]') && !mediaTile(img)) return false;
         try { const url = new URL(img.currentSrc || img.src); return url.protocol === 'https:' && url.hostname === 'pbs.twimg.com' && url.pathname.startsWith('/media/'); } catch { return false; }
       });
-      const index = images.findIndex(img => photo.contains(img));
+      const index = images.findIndex(img => photo.contains(img) || (photo.matches('a[href*="/photo/"]') && mediaTile(img) === photo.parentElement));
       if (index < 0) return false;
       event.preventDefault(); event.stopImmediatePropagation();
       open(images.map(img => {

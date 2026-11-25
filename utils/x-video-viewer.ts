@@ -1,16 +1,16 @@
+import { WEB, PLAYER } from './x-dom.ts';
 import { resolveLocale } from './i18n.ts';
 import { installXVideoPlayback } from './x-video-playback.ts';
 
 const PRIMARY_TEST_ID = 'primaryColumn';
 const PLAYER_TEST_ID = 'videoPlayer';
-const PLAYER = `[data-testid="${PLAYER_TEST_ID}"]`;
-const POST_PLAYER = `[data-testid="${PRIMARY_TEST_ID}"] article ${PLAYER}`;
+const POST_PLAYER = `[data-testid="primaryColumn"] article ${PLAYER}, ${WEB} main article ${PLAYER}`;
 const MEDIA = `${PLAYER},video`;
 const EXPANDED = 'data-site-enhancer-video-expanded';
 const FRAME = 'data-site-enhancer-video-frame';
 const BUTTON = 'data-site-enhancer-video-expand';
 const CSS = `
-[data-testid="primaryColumn"] ${PLAYER} video{object-fit:contain!important}
+${PLAYER} video{object-fit:contain!important}
 [${BUTTON}]{position:absolute;right:10px;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
 [${BUTTON}]:hover{background:#303640}
 [${BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}

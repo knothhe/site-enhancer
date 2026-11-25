@@ -25,6 +25,8 @@ export function normalizeQuoteUrl(path: string, origin: string): string | undefi
 }
 
 export function resolveQuoteUrl(card: Element, origin: string): string | undefined {
+  const href = card.getAttribute('data-href');
+  if (href) return normalizeQuoteUrl(href, origin);
   card.removeAttribute(QUOTE_URL);
   const EventClass = card.ownerDocument.defaultView!.Event;
   card.dispatchEvent(new EventClass(QUOTE_REQUEST, { bubbles: true }));

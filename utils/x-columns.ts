@@ -1,3 +1,4 @@
+import { PRIMARY as PRIMARY_COLUMN, PRIMARY_POST, POST, POST_LINK, TIMESTAMP, PLAYER, WEB, COLUMN_MAIN, focusedPost, isNativeRoute } from './x-dom.ts';
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
 import { installXImageViewer } from './x-image-viewer.ts';
 import { installXVideoViewer } from './x-video-viewer.ts';
@@ -20,6 +21,8 @@ export function parseColumnWidths(value: unknown): ColumnWidths {
     ? { nav, share } : { ...DEFAULT_COLUMNS };
 }
 const MAX_FEED = 680;
+/** How long a missing timeline column is treated as a route change rather than an unsupported page. */
+export const STRUCTURE_GRACE_MS = 1500;
 const shareBasis = (available: number) => Math.min(available, MAX_FEED / DEFAULT_COLUMNS.share);
 export function columnGeometry(width: number, preference: ColumnWidths) {
   const nav = Math.min(preference.nav, Math.max(88, width - 800));
@@ -29,7 +32,12 @@ export function columnGeometry(width: number, preference: ColumnWidths) {
 }
 /** The post's own timestamp link, skipping timestamps inside quoted-post cards. */
 export function postPermalink(article: Element): string | undefined {
-  return Array.from(article.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]:has(time)')).find(link => {
+  const wrapper = article.parentElement;
+  if (wrapper?.matches(POST_LINK)) {
+    const href = wrapper.getAttribute('data-href');
+    if (href) return detailUrl(href, article.ownerDocument.location.origin);
+  }
+  return Array.from(article.querySelectorAll<HTMLAnchorElement>(TIMESTAMP)).find(link => {
     const card = link.parentElement?.closest('[role="link"]');
     return !card || !article.contains(card);
   })?.href;
@@ -43,6 +51,9 @@ export function detailUrl(href: string, origin: string): string | undefined {
 }
 
 export const DETAIL_FRAME_CSS = `
+${WEB} body > div:has(> .flex > div.grid > main){max-width:none!important;padding:0!important;--x-main-column-width:100%!important}
+${WEB} div:has(+ div.grid > main),${WEB} main + aside,${WEB} main :is([data-page-header],[data-top-chrome]),${WEB} [data-slot="xds-dock"]{display:none!important}
+${WEB} div.grid:has(> main){display:block!important;max-width:none!important}
 html,body{min-width:0!important}
 header[role="banner"],[data-testid="sidebarColumn"],[data-testid="DMDrawer"],[data-testid="chat-drawer-root"]{display:none!important}
 main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),[data-testid="primaryColumn"]{width:100%!important;max-width:none!important;min-width:0!important;margin:0!important;flex-grow:1!important}
@@ -54,11 +65,24 @@ main[role="main"] [data-testid="primaryColumn"]{max-width:760px!important;margin
 html{scrollbar-width:thin;scrollbar-color:#8885 transparent}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
-const PRIMARY_COLUMN = '[data-testid="primaryColumn"]';
-const HEADER_CONTROL = '[role="tablist"], [data-testid="app-bar-back"]';
+
+const HEADER_CONTROL = '[data-page-header], [data-top-chrome], [role="tablist"], [data-testid="app-bar-back"]';
 const HEADER_TARGET = `${PRIMARY_COLUMN}, ${HEADER_CONTROL}`;
 const TIMELINE_CELL = '[data-testid="cellInnerDiv"], article[data-testid="tweet"]';
+const W = WEB + '[data-site-enhancer-columns]';
+const row = W + ' body > div > .flex:has(> div.grid > main)';
 export const COLUMNS_CSS = `
+${W} body > div:has(> .flex > div.grid > main){max-width:none!important;padding:0!important;overflow:visible!important;--x-main-column-width:var(--se-feed)!important;--x-timeline-max-width:var(--se-feed)}
+${row}{justify-content:flex-start!important}
+${row} > div:first-child,${row} > div:first-child > div{width:var(--se-nav)!important;flex:none!important;--x-sidebar-expanded:1!important}
+${W}[data-site-enhancer-compact-nav] body > div > .flex:has(> div.grid > main) > div:first-child > div{--x-sidebar-expanded:0!important;box-sizing:border-box;padding-inline:8px!important}
+${row} > div.grid{display:grid!important;grid-template-columns:var(--se-feed) var(--se-detail)!important;max-width:none!important;min-width:0!important}
+${row} > div.grid > main{position:relative;isolation:isolate;margin:0!important}
+${row} > div.grid > aside{display:none!important}
+${W}:has(#site-enhancer-columns [data-state="empty"]) main + aside{display:flex!important;position:sticky;top:var(--se-column-header-height,54px);align-self:start;max-height:calc(100vh - var(--se-column-header-height,54px));overflow:auto;margin-top:var(--se-column-header-height,54px)}
+${W}:has(main + aside) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
+${W}:has(main + aside) #site-enhancer-columns [data-state="empty"]{display:none}
+${W} body > [data-base-ui-portal]{position:relative;z-index:6}
 ${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:#8885 transparent}
 ${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:var(--se-column-line)!important}
 ${SCOPE} [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
@@ -365,9 +389,8 @@ export function installXColumns(options: {
     hoverFrame = undefined;
     options.releaseDetail?.();
   }
-  const tweet = 'article[data-testid="tweet"]';
   function hover(event: PointerEvent) {
-    const article = (event.target as Element)?.closest?.(tweet);
+    const article = (event.target as Element)?.closest?.(POST);
     if (!article?.closest(PRIMARY_COLUMN) || article.contains(event.relatedTarget as Node | null)) return;
     if (event.type === 'pointermove' && article === hoverArticle) return;
     cancelHover();
@@ -389,12 +412,13 @@ export function installXColumns(options: {
   }
   function follow(event: FocusEvent) {
     clearTimeout(followTimer);
-    const article = event.target as HTMLElement;
-    if (!selected || !article.matches?.(tweet) || !article.closest(PRIMARY_COLUMN) || article.isContentEditable) return;
+    const target = event.target as HTMLElement;
+    const article = focusedPost(target) as HTMLElement | undefined;
+    if (!selected || !article || !article.closest(PRIMARY_COLUMN) || article.isContentEditable) return;
     followTimer = setTimeout(() => {
       const url = detailUrl(postPermalink(article) ?? '', location.origin);
-      if (selected && url && url !== selected && article === document.activeElement && !document.querySelector(X_OVERLAY_SELECTOR)) {
-        returnFocus = article;
+      if (selected && url && url !== selected && target === document.activeElement && !document.querySelector(X_OVERLAY_SELECTOR)) {
+        returnFocus = target;
         history.select(url);
       }
     }, 150);
@@ -419,7 +443,7 @@ export function installXColumns(options: {
   }
   function openDetail(url: string) {
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
-    selectedArticle = Array.from(document.querySelectorAll('article[data-testid="tweet"]')).find(article =>
+    selectedArticle = Array.from(document.querySelectorAll(POST)).find(article =>
       detailUrl(postPermalink(article) ?? '', location.origin) === url);
     selectedArticle?.setAttribute('data-site-enhancer-selected', '');
     selectedOffset = selectedArticle ? window.scrollY + selectedArticle.getBoundingClientRect().top : undefined;
@@ -482,8 +506,8 @@ export function installXColumns(options: {
             style.textContent = DETAIL_FRAME_CSS;
             (doc.head ?? doc.documentElement).append(style);
           }
-          const primary = doc.querySelector('[data-testid="primaryColumn"]');
-          if (primary && (primary.querySelector('[data-testid="tweet"]') ||
+          const primary = doc.querySelector(PRIMARY_COLUMN);
+          if (primary && (primary.querySelector(POST) ||
             (Date.now() - started > 1500 && !primary.querySelector('[role="progressbar"]') && (primary.textContent?.length ?? 0) > 50))) {
             doc.addEventListener('click', click, true);
             doc.addEventListener('keydown', openFocused, true);
@@ -608,7 +632,7 @@ export function installXColumns(options: {
     document.body.append(navToggle);
     bodyObserver = new MutationObserver(renderTheme);
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
-    bodyObserver.observe(root, { attributes: true, attributeFilter: ['data-site-enhancer-x-theme', 'data-site-enhancer-x-tone'] });
+    bodyObserver.observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-site-enhancer-x-theme', 'data-site-enhancer-x-tone'] });
     renderTheme();
     syncNativeNav();
     let observedWidth: number | undefined;
@@ -670,7 +694,7 @@ export function installXColumns(options: {
     for (const record of records) for (const node of record.addedNodes) {
       if (node.nodeType !== 1) continue;
       const element = node as Element;
-      const articles = element.matches('article[data-testid="tweet"]') ? [element] : element.querySelectorAll('article[data-testid="tweet"]');
+      const articles = element.matches(POST) ? [element] : element.querySelectorAll(POST);
       for (const article of articles) {
         if (!article.closest(PRIMARY_COLUMN) || detailUrl(postPermalink(article) ?? '', location.origin) !== selected) continue;
         selectedArticle = article;
@@ -716,7 +740,7 @@ export function installXColumns(options: {
     const unmeasured: Element[] = [];
     while (candidate && candidate !== primary) {
       const rect = candidate.getBoundingClientRect();
-      if (rect.height >= 32 && rect.height <= 120 && Math.abs(rect.top) < 2 && parseFloat(getComputedStyle(candidate).borderBottomWidth) > 0) {
+      if (rect.height >= 32 && rect.height <= 120 && Math.abs(rect.top) < 2 && (candidate.matches('[data-page-header],[data-top-chrome]') || parseFloat(getComputedStyle(candidate).borderBottomWidth) > 0)) {
         measuredHeader = candidate;
         height = rect.height;
         measuredHeader.setAttribute('data-site-enhancer-column-header', '');
@@ -793,6 +817,8 @@ export function installXColumns(options: {
   }
   function blur() { end(); }
   function unmount() {
+    clearTimeout(structureTimer);
+    structureTimer = undefined;
     hidePrevious();
     cancelHover();
     clearTimeout(followTimer);
@@ -830,12 +856,27 @@ export function installXColumns(options: {
   }
   function refresh() {
     if (disposed) return;
+    if (observedBody !== document.body) observeStructure();
     const width = enabled ? viewportWidth() : 0;
-    if (width < COLUMNS_MIN_WIDTH) return unmount();
+    if (width < COLUMNS_MIN_WIDTH || isNativeRoute(location.pathname)) {
+      if (panel) unmount();
+      return;
+    }
+    structure = document.querySelector(COLUMN_MAIN);
+    if (!structure) {
+      // X removes the column for several hundred milliseconds between routes; keep the layout meanwhile.
+      if (panel) structureTimer ??= setTimeout(unmount, STRUCTURE_GRACE_MS);
+      return;
+    }
+    clearTimeout(structureTimer);
+    structureTimer = undefined;
+    if (!panel && root.matches(WEB) && document.readyState === 'loading') return;
+    if (!sheet.isConnected) (document.head ?? root).append(sheet);
+    if (panel && !panel.isConnected) unmount();
     mount();
     if (!panel) return;
     root.toggleAttribute('data-site-enhancer-columns', true);
-    if (width !== renderedWidth) renderWidths(width);
+    if (width !== renderedWidth || !root.style.getPropertyValue('--se-feed')) renderWidths(width);
     if (!measuredHeader?.isConnected) syncHeader();
   }
   /** X closes a video's context menu only when a click reaches its own document. Clicks in
@@ -843,7 +884,7 @@ export function installXColumns(options: {
   let dismissing = false;
   function dismissMenus(doc: Document) {
     const view = doc.defaultView;
-    if (dismissing || !view || !doc.body || !doc.querySelector('#layers [role="menu"]')) return;
+    if (dismissing || !view || !doc.body || !doc.querySelector('#layers [role="menu"], html[data-app-version] [role="menu"]')) return;
     dismissing = true;
     try { doc.body.dispatchEvent(new view.MouseEvent('click', { bubbles: true, cancelable: true, view, button: 0 })); }
     finally { dismissing = false; }
@@ -859,9 +900,9 @@ export function installXColumns(options: {
   function openFromClick(event: MouseEvent) {
     if (!panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
-    if (!target?.closest(PRIMARY_COLUMN) || !target.closest('article[data-testid="tweet"]') || !active()) return;
+    if (!target?.closest(PRIMARY_COLUMN) || !target.closest(POST) || !active()) return;
     if (imageViewer.handleClick(event)) return;
-    if (target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoPlayer"],[data-testid="videoComponent"],[contenteditable="true"]')) return;
+    if (target.closest(PLAYER) || target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoComponent"],[contenteditable="true"]')) return;
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;
     const link = target.closest<HTMLAnchorElement>('a[href]');
     const article = target.closest('article')!;
@@ -874,7 +915,7 @@ export function installXColumns(options: {
     if (!url || link?.target === '_blank' || link?.hasAttribute('download')) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    returnFocus = (link ?? article) as HTMLElement;
+    returnFocus = (link ?? article.parentElement?.closest(POST_LINK) ?? article) as HTMLElement;
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = article;
     selectedArticle.setAttribute('data-site-enhancer-selected', '');
@@ -890,11 +931,12 @@ export function installXColumns(options: {
         document.querySelector(X_OVERLAY_SELECTOR) || target.ownerDocument.querySelector(X_OVERLAY_SELECTOR)) return;
       let destination: HTMLElement | undefined;
       if (event.key === ']' && target.ownerDocument === document && target.closest(PRIMARY_COLUMN) && frame) {
-        const articles = frameDocuments.get(frame)?.querySelectorAll<HTMLElement>(PRIMARY_COLUMN + ' article[data-testid="tweet"]');
+        const articles = frameDocuments.get(frame)?.querySelectorAll<HTMLElement>(PRIMARY_POST);
         if (articles) destination = Array.from(articles).find(article => detailUrl(postPermalink(article) ?? '', location.origin) === selected) ?? articles[0];
       } else if (event.key === '[' && target.ownerDocument === frame?.contentDocument) {
         destination = selectedArticle as HTMLElement ?? returnFocus;
       }
+      destination = destination?.parentElement?.closest<HTMLElement>(POST_LINK) ?? destination;
       if (destination?.isConnected) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -905,13 +947,13 @@ export function installXColumns(options: {
     }
     if (!panel || event.key !== 'Enter' || event.defaultPrevented || event.isComposing || event.repeat ||
       event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !active()) return;
-    const article = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
-    if (!article?.matches('article[data-testid="tweet"]') || !article.closest(PRIMARY_COLUMN)) return;
+    const article = event.target && (event.target as Element).nodeType === 1 ? focusedPost(event.target as Element) : undefined;
+    if (!article || !article.closest(PRIMARY_COLUMN)) return;
     const url = detailUrl(postPermalink(article) ?? '', location.origin);
     if (!url) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    returnFocus = article as HTMLElement;
+    returnFocus = event.target as HTMLElement;
     if (article.ownerDocument === document) {
       selectedArticle?.removeAttribute('data-site-enhancer-selected');
       selectedArticle = article;
@@ -936,6 +978,26 @@ export function installXColumns(options: {
     if (event.key !== COLUMNS_WIDTH_KEY) return;
     try { widths = parseColumnWidths(JSON.parse(event.newValue ?? 'null')); renderWidths(); } catch { /* Ignore invalid cross-tab data. */ }
   }
+  let structure: Element | null = null;
+  let structureFrame: number | undefined;
+  let structureTimer: ReturnType<typeof setTimeout> | undefined;
+  const structureObserver = new MutationObserver(() => {
+    if (!enabled || structureFrame !== undefined) return;
+    if (panel?.isConnected && structure?.matches(COLUMN_MAIN) && structure.isConnected &&
+      sheet.isConnected && root.hasAttribute('data-site-enhancer-columns') && root.style.getPropertyValue('--se-feed')) return;
+    // Coalesce streamed fragments and transient SPA removals before the next paint.
+    structureFrame = window.requestAnimationFrame(() => { structureFrame = undefined; refresh(); });
+  });
+  let observedBody: HTMLElement | null = null;
+  const observeStructure = () => {
+    observedBody = document.body;
+    structureObserver.disconnect();
+    structureObserver.observe(root, { childList: true, attributes: true,
+      attributeFilter: ['data-app-env', 'data-app-version', 'data-site-enhancer-columns', 'style'] });
+    if (document.body) structureObserver.observe(document.body, { childList: true, subtree: true,
+      attributes: true, attributeFilter: ['data-testid', 'class'] });
+  };
+  observeStructure();
   document.addEventListener('focusin', follow);
   document.addEventListener('pointermove', hover);
   window.addEventListener('scroll', scrolling, { capture: true, passive: true });
@@ -962,6 +1024,8 @@ export function installXColumns(options: {
     },
     remove() {
       disposed = true;
+      structureObserver.disconnect();
+      if (structureFrame !== undefined) window.cancelAnimationFrame(structureFrame);
       videoViewer.setPlayback(false);
       langObserver.disconnect();
       unmount();

@@ -1,3 +1,4 @@
+import { preserveWebStyles } from './x-dom.ts';
 /**
  * Color themes for X, independent of the layout styles in x-style.ts.
  *
@@ -152,7 +153,7 @@ const SCOPE = `:root[${X_THEME_ATTR}][${X_TONE_ATTR}]`;
 export const X_PALETTE_CSS = Object.entries(X_THEMES).flatMap(([name, theme]) =>
   (['light', 'dark'] as const).map(tone => `:root[${X_THEME_ATTR}="${name}"][${X_TONE_ATTR}="${tone}"]{${
     Object.entries(theme[tone]).map(([token, value]) => `--se-x-${token}:${value}`).join(';')}}`),
-).concat(`${SCOPE},${SCOPE} body{background-color:var(--se-x-bg)!important;color:var(--se-x-text)!important}`).join('\n');
+).concat(`${SCOPE}[data-app-version]{--x-bg-primary:var(--se-x-bg);--x-bg-secondary:var(--se-x-raised);--x-bg-modal:var(--se-x-raised);--x-bg-inputs:var(--se-x-input);--x-fg-primary:var(--se-x-text);--x-fg-secondary:var(--se-x-muted);--x-fg-brand:var(--se-x-accent);--x-border-normal:var(--se-x-border);--x-border-divider:var(--se-x-border)}`,`${SCOPE},${SCOPE} body{background-color:var(--se-x-bg)!important;color:var(--se-x-text)!important}`).join('\n');
 
 export function readCachedXTheme(): XTheme {
   try {
@@ -190,7 +191,15 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let startedAt = 0;
 
+  let activeTheme = initial;
+  let activeTone: 'dark' | 'light' | undefined;
+  const stopRepairs = preserveWebStyles([paletteStyle, rulesStyle], [X_THEME_ATTR, X_TONE_ATTR], () => {
+    if (activeTheme !== 'original' && root.getAttribute(X_THEME_ATTR) !== activeTheme) root.setAttribute(X_THEME_ATTR, activeTheme);
+    if (activeTone && root.getAttribute(X_TONE_ATTR) !== activeTone) root.setAttribute(X_TONE_ATTR, activeTone);
+  });
+
   function setTone(tone: 'light' | 'dark' | undefined) {
+    activeTone = tone;
     if (tone) root.setAttribute(X_TONE_ATTR, tone);
     else root.removeAttribute(X_TONE_ATTR);
   }
@@ -204,21 +213,23 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
   function refresh() {
     if (!document.body) return;
     const sheets = Array.from(document.styleSheets);
-    const next = `${document.body.style.backgroundColor}|${sheets.length}|${sheets.reduce((sum, sheet) => {
+    const webTone = root.getAttribute('data-theme');
+    const next = `${webTone}|${document.body.style.backgroundColor}|${sheets.length}|${sheets.reduce((sum, sheet) => {
       try { return sum + sheet.cssRules.length; } catch { return sum; }
     }, 0)}`;
     if (next === signature) return;
     signature = next;
-    const tone = detectXTone(document.body.style.backgroundColor || getComputedStyle(document.body).backgroundColor);
+    const tone = webTone === 'dark' || webTone === 'light' ? webTone : detectXTone(document.body.style.backgroundColor || getComputedStyle(document.body).backgroundColor);
     const mode = tone && (tone === 'light' ? 'light' : 'dark');
     setTone(mode);
     if (mode) {
       try { localStorage.setItem(TONE_CACHE_KEY, mode); } catch { /* Optional cache. */ }
     }
-    rulesStyle.textContent = tone ? buildXThemeCss(liveRules(), tone, SCOPE) : '';
+    rulesStyle.textContent = tone && !root.hasAttribute('data-app-version') ? buildXThemeCss(liveRules(), tone, SCOPE) : '';
   }
 
   function setTheme(theme: XTheme) {
+    activeTheme = theme;
     clearTimeout(timer);
     timer = undefined;
     signature = '';
@@ -227,7 +238,7 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
     } catch { /* Storage may be blocked; the extension setting remains the source of truth. */ }
     if (theme === 'original') {
       root.removeAttribute(X_THEME_ATTR);
-      root.removeAttribute(X_TONE_ATTR);
+      setTone(undefined);
       rulesStyle.textContent = '';
       return;
     }
@@ -248,6 +259,7 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
   return {
     setTheme,
     remove() {
+      stopRepairs();
       clearTimeout(timer);
       // A newer instance that replaced these stylesheets now owns the page state.
       if (!paletteStyle.isConnected) return;

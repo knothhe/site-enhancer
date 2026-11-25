@@ -1,10 +1,10 @@
+import { PLAYER } from './x-dom.ts';
 import { VIDEO_PLAY_REQUEST } from './x-video-gate.ts';
 
 /** Page-local like the other layout preferences, so every X tab and detail frame shares it. */
 export const VIDEO_VOLUME_KEY = 'site-enhancer:x-video-volume';
 export type VideoVolume = { volume: number; muted: boolean };
 
-const PLAYER = '[data-testid="videoPlayer"]';
 const DIALOG = '[role="dialog"],[aria-modal="true"]';
 const SCRUBBER = '[data-testid="scrubber"]';
 /** X reacts to a volume control a little after the press, or while it is dragged. */
@@ -24,6 +24,7 @@ function playerOf(node: Element | null) {
 /** Whether a press is on a player's volume control: X pairs the mute button with the only slider
  * outside the scrubber. Labels are localized, so the structure identifies it. */
 function onVolumeControl(target: Element, player: HTMLElement) {
+  if (target.closest('button')?.querySelector('svg[data-icon^="icon-sound-"]')) return true;
   for (const slider of player.querySelectorAll('[role="slider"]')) {
     if (slider.closest(SCRUBBER)) continue;
     let wrap = slider.parentElement;

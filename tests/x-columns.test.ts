@@ -1,8 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { getTweetData } from '../utils/x-menu.ts';
+import { PRIMARY } from '../utils/x-dom.ts';
 import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-ready.ts';
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS } from '../utils/x-columns.ts';
+import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
 
 import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
@@ -14,7 +17,7 @@ beforeEach(() => {
   // State tests use reduced motion; animation behavior is tested with a controlled timeline below.
   const matchMedia = win.matchMedia.bind(win);
   win.matchMedia = query => { const result = matchMedia(query); if (query === '(prefers-reduced-motion: reduce)') Object.defineProperty(result, 'matches', { value: true }); return result; };
-  for (const name of ['window', 'document', 'location', 'localStorage', 'Element', 'MutationObserver', 'getComputedStyle']) {
+  for (const name of ['window', 'document', 'location', 'localStorage', 'Node', 'Element', 'MutationObserver', 'getComputedStyle']) {
     Object.defineProperty(globalThis, name, { configurable: true, value: name === 'window' ? win : name === 'getComputedStyle' ? win.getComputedStyle.bind(win) : (win as any)[name] });
   }
   document.body.innerHTML = `<main role="main"><div data-testid="primaryColumn"><article data-testid="tweet" tabindex="0"><a href="/alice/status/123"><time>now</time></a><div data-testid="tweetText">Post body</div><a href="/alice">Profile</a><a href="/alice/status/123/photo/1">Photo</a><button>Like</button><a href="https://example.com">External</a></article></div></main>`;
@@ -446,7 +449,7 @@ test('loading and updating the timeline does not rediscover the header until it 
   const search = t.mock.method(document, 'querySelector', querySelector);
   start();
   await win.happyDOM.waitUntilComplete();
-  const headerSearches = () => search.mock.calls.filter(call => call.arguments[0] === '[data-testid="primaryColumn"]').length;
+  const headerSearches = () => search.mock.calls.filter(call => call.arguments[0] === PRIMARY).length;
   const initialSearches = headerSearches();
 
   for (let i = 0; i < 3; i++) {
@@ -1538,4 +1541,56 @@ test('native icon rail follows label removal and restores the saved nav width', 
   home.querySelector('span')!.remove();
   await new Promise(resolve => setTimeout(resolve, 0));
   assert.equal(width(), '88px');
+});
+
+test('x-web mounts after streaming, copies only the selected post and keeps unsupported pages native', async () => {
+  const fixture = readFileSync(new URL('../scripts/browser-regression/fixtures/x-web.html', import.meta.url), 'utf8');
+  document.body.replaceChildren();
+  const layout = start();
+  const panel = () => document.getElementById('site-enhancer-columns');
+  assert.equal(panel(), null);
+  document.documentElement.setAttribute('data-app-env', 'test');
+  document.documentElement.setAttribute('data-app-version', 'fixture');
+  document.body.innerHTML = fixture.split('<body>')[1].split('</body>')[0];
+  await win.happyDOM.waitUntilComplete();
+  assert.ok(panel());
+  const post = document.querySelector('article')!;
+  assert.deepEqual(getTweetData(post), { text: 'Sample text', url: 'https://x.com/example/status/101' });
+  assert.equal(postPermalink(post), 'https://x.com/example/status/101');
+  let ready = false;
+  observeDetailReady(document, () => { ready = true; });
+  assert.ok(ready);
+  const wrapper = post.parentElement!;
+  wrapper.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }) as unknown as Event);
+  assert.equal(document.querySelector('iframe')?.src, 'https://x.com/example/status/101');
+  assert.ok(click('article article div').defaultPrevented);
+  assert.ok([...document.querySelectorAll('iframe')].some(frame => frame.src.endsWith('/quoted/status/202')));
+  for (const path of ['/settings/account', '/messages', '/i/chat/1', '/i/grok']) {
+    win.history.replaceState(null, '', path);
+    layout.onNavigate();
+    assert.equal(panel(), null);
+  }
+  win.history.replaceState(null, '', '/home');
+  layout.onNavigate();
+  assert.ok(panel());
+});
+
+test('a column missing between routes keeps the layout, and a lasting absence returns to native', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const layout = start();
+  const mounted = document.getElementById('site-enhancer-columns');
+  assert.ok(mounted);
+  const main = document.querySelector('main')!;
+  main.remove();
+  layout.onNavigate();
+  t.mock.timers.tick(STRUCTURE_GRACE_MS - 1);
+  assert.equal(document.getElementById('site-enhancer-columns'), mounted);
+  document.body.append(main);
+  layout.onNavigate();
+  t.mock.timers.tick(STRUCTURE_GRACE_MS);
+  assert.equal(document.getElementById('site-enhancer-columns'), mounted);
+  main.remove();
+  layout.onNavigate();
+  t.mock.timers.tick(STRUCTURE_GRACE_MS);
+  assert.equal(document.getElementById('site-enhancer-columns'), null);
 });

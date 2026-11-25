@@ -1,3 +1,4 @@
+import { preserveWebStyles } from '../utils/x-dom';
 import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-ready';
 import { DETAIL_FRAME_CSS, DETAIL_FRAME_NAME, installXColumns } from '../utils/x-columns';
 import { installXStyle, isXOverlayRoute } from '../utils/x-style';
@@ -14,13 +15,13 @@ export default defineContentScript({
     const isDetail = window.top !== window && window.name === DETAIL_FRAME_NAME;
     // Other frames are not extension-owned detail views.
     if (window.top !== window && !isDetail) return;
-    const xStyle = installXStyle();
+    const xStyle = installXStyle(undefined, isDetail);
     if (isDetail) {
-      document.documentElement.setAttribute('data-site-enhancer-x', 'clean');
       const frameStyle = document.createElement('style');
       frameStyle.id = 'site-enhancer-detail-frame-style';
       frameStyle.textContent = DETAIL_FRAME_CSS;
       (document.head ?? document.documentElement).append(frameStyle);
+      ctx.onInvalidated(preserveWebStyles([frameStyle]));
       ctx.onInvalidated(() => frameStyle.remove());
       ctx.onInvalidated(holdPreloadedAutoplay(window));
       ctx.onInvalidated(observeDetailReady(document, () => {
@@ -39,7 +40,6 @@ export default defineContentScript({
     });
     const setStyle = (value: import('../utils/x-style').XStyle) => {
       xStyle.setStyle(value);
-      if (isDetail) document.documentElement.setAttribute('data-site-enhancer-x', 'clean');
       columns?.setEnabled(value === 'columns');
     };
     if (columns) columns.setEnabled(document.documentElement.getAttribute('data-site-enhancer-x') === 'columns');

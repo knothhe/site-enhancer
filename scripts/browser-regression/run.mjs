@@ -120,6 +120,7 @@ for (const name of ['x', 'linux-do']) {
   writeFileSync(file, `globalThis.__seShimName=${JSON.stringify(name)};\n${shim}\n${readFileSync(file, 'utf8')}`);
 }
 const fixtures = {
+  'x-web': readFileSync(join(here, 'fixtures/x-web.html'), 'utf8'),
   x: readFileSync(join(here, 'fixtures/x.html'), 'utf8'),
   'linux-do': readFileSync(join(here, 'fixtures/linux-do.html'), 'utf8'),
 };
@@ -181,8 +182,12 @@ function send(method, params = {}, sessionId, timeout = 10_000) {
 async function findExtensionId() {
   for (let i = 0; i < 50; i++) {
     const { targetInfos } = await send('Target.getTargets');
-    const id = targetInfos.map(t => t.url.match(/^chrome-extension:\/\/([a-p]{32})\//)?.[1]).find(Boolean);
-    if (id) return id;
+    for (const target of targetInfos.filter(t => t.type === 'service_worker' && t.url.endsWith('/background.js'))) {
+      const { sessionId } = await send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+      const { result } = await send('Runtime.evaluate', { expression: "chrome.runtime.getManifest().name", returnByValue: true }, sessionId);
+      await send('Target.detachFromTarget', { sessionId });
+      if (result.value === 'site-enhancer') return new URL(target.url).hostname;
+    }
     if (i === 10) {
       // Branded Chrome ignores --load-extension; CDP loading needs --enable-unsafe-extension-debugging.
       try { return (await send('Extensions.loadUnpacked', { path: extDir })).id; } catch {}
@@ -199,7 +204,7 @@ function serve(url) {
   const site = /(^|\.)x\.com$/.test(hostname) ? 'x' : hostname === 'linux.do' ? 'linux-do' : undefined;
   if (!site) return undefined;
   if (pathname === '/favicon.ico') return { status: 404, body: '' };
-  return { status: 200, body: fixtures[site].replace('__LANG__', searchParams.get('lang') ?? 'en') };
+  return { status: 200, body: fixtures[site === 'x' && searchParams.has('x-web') ? 'x-web' : site].replace('__LANG__', searchParams.get('lang') ?? 'en') };
 }
 
 async function openPage({ url, width = 1000, height = 700, scale = 1, dark = false, init }) {
@@ -290,6 +295,48 @@ async function step(name, fn) {
 
 // ------------------------------------------------------------------- X ---
 
+await step('x-web columns and native layout fallback', async () => {
+  const { targetInfos } = await send('Target.getTargets');
+  const worker = targetInfos.find(target => target.url === `chrome-extension://${extId}/background.js`);
+  const { sessionId } = await send('Target.attachToTarget', { targetId: worker.targetId, flatten: true });
+  const setStyle = (value, theme = 'original') => send('Runtime.evaluate', {
+    expression: `chrome.storage.local.set({xStyle:${JSON.stringify(value)},xTheme:${JSON.stringify(theme)}})`, awaitPromise: true,
+  }, sessionId);
+  await setStyle('columns');
+  try {
+    const page = await openPage({ url: 'https://x.com/home?x-web', width: 1262 });
+    await page.waitFor('column panel', "return document.querySelector('#site-enhancer-columns')?.isConnected");
+    equal('main edge meets details', await page.eval(`return Math.round(document.querySelector('main').getBoundingClientRect().right -
+      document.querySelector('#site-enhancer-columns').getBoundingClientRect().left);`), 0);
+    check('video viewer installed', await page.eval("return !!document.querySelector('[data-site-enhancer-video-expand]')"));
+    await page.eval(`document.querySelector('[data-slot="xds-menu-trigger"]').onpointerdown = () => {
+      const portal = document.createElement('div');
+      portal.innerHTML = '<div role="menu"><button role="menuitem">Native action</button></div>';
+      portal.onkeydown = event => { if (event.key === 'Escape') portal.remove(); };
+      document.body.append(portal);
+    }`);
+    await page.click('[data-slot="xds-menu-trigger"]');
+    await page.waitFor('x-web menu items', "return document.querySelectorAll('.site-enhancer-menuitem').length === 4");
+    await page.click('.site-enhancer-menuitem:nth-child(2)');
+    equal('plain post text copied from x-web menu', await page.clipboard(), [{ text: 'Sample text', via: 'clipboard' }]);
+    check('x-web menu dismissed', await page.eval("return !document.querySelector('[role=menu]')"));
+    await page.click('a[href$="/photo/1"]');
+    check('opens image viewer', await page.eval("return !!document.getElementById('site-enhancer-image-viewer')"));
+    await setStyle('reading', 'graphite');
+    await page.waitFor('reading typography', "return getComputedStyle(document.querySelector('article [dir=auto]')).fontSize === '17px'");
+    await page.waitFor('x-web palette', "return getComputedStyle(document.documentElement).getPropertyValue('--x-bg-primary').trim() === '#f5f6f8'");
+    await page.eval("document.getElementById('site-enhancer-x-style').remove(); document.documentElement.removeAttribute('data-site-enhancer-x')");
+    await page.waitFor('style restored after hydration', "return getComputedStyle(document.querySelector('article [dir=auto]')).fontSize === '17px'");
+    await setStyle('columns');
+    await page.waitFor('column layout restored', "return !!document.getElementById('site-enhancer-columns')");
+    await page.eval("document.querySelector('main').remove()");
+    await page.waitFor('native fallback', "return !document.querySelector('#site-enhancer-columns')");
+    await page.close();
+  } finally {
+    await setStyle('original');
+  }
+});
+
 let xPage;
 await step('X More menu (keyboard)', async () => {
   const page = xPage = await openPage({ url: 'https://x.com/home?lang=en' });
@@ -309,10 +356,10 @@ await step('X More menu (keyboard)', async () => {
     await page.clearClipboard();
     await page.eval(`window.__fixture.caretClicks = 0; window.__fixture.opens = []; document.querySelector('#t1 [data-testid="caret"]').focus();`);
     await page.key(c.key);
-    await page.waitFor(`${label} menu`, `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 3;`);
+    await page.waitFor(`${label} menu`, `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 4;`);
     await sleep(300); // Give the observer time to (wrongly) inject twice.
     equal(`${label}: copy items injected once, before native items`, await page.eval(`return ${items};`),
-      ['Copy post with link', 'Copy post text only', 'Copy post link', 'Not interested', 'Follow']);
+      ['Copy post with link', 'Copy post text only', 'Copy post link', 'Copy post as image', 'Not interested', 'Follow']);
     equal(`${label}: menu opened from keydown without a click`, await page.eval(`return window.__fixture;`), { caretClicks: 0, opens: ['keydown'] });
     check(`${label}: native height lock released`, await page.eval(`return document.querySelector('.fixture-height').getBoundingClientRect().height > 88;`));
     if (c === cases[0]) await page.shot('x-menu-keyboard-en');
@@ -332,7 +379,7 @@ await step('X More menu (keyboard)', async () => {
   // Mouse-opened menus on another post copy that post.
   await page.clearClipboard();
   await page.click('#t2 [data-testid="caret"]');
-  await page.waitFor('mouse menu', `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 3;`);
+  await page.waitFor('mouse menu', `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 4;`);
   await page.click('[role="menu"] .site-enhancer-menuitem:nth-child(1)');
   await page.waitFor('mouse copy', `return document.documentElement.hasAttribute('data-se-test-clipboard');`);
   equal('mouse: second post copied with its own link', await page.clipboard(), [{ text: 'Another post\nhttps://x.com/carol/status/42\n#X', via: 'clipboard' }]);
@@ -343,9 +390,9 @@ await step('X More menu (Chinese page)', async () => {
   await page.waitFor('content scripts', `return [...document.querySelectorAll('style')].some(s => s.textContent.includes('site-enhancer-menuitem'));`);
   await page.eval(`document.querySelector('#t1 [data-testid="caret"]').focus();`);
   await page.key(' ');
-  await page.waitFor('menu', `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 3;`);
+  await page.waitFor('menu', `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 4;`);
   equal('zh: labels follow the page language', await page.eval(`return [...document.querySelectorAll('.site-enhancer-menuitem')].map(i => i.textContent);`),
-    ['复制推文和链接', '仅复制推文文字', '复制推文链接']);
+    ['复制推文和链接', '仅复制推文文字', '复制推文链接', '复制推文为截图']);
   await page.shot('x-menu-keyboard-zh');
   await page.close();
 });
