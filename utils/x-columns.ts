@@ -125,8 +125,12 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:not(:first-child){display:none!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:first-child{width:24px!important;height:24px!important;min-width:24px!important;flex-basis:24px!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"] :is(img,[data-testid^="UserAvatar-Container"]){width:24px!important;height:24px!important;min-width:24px!important}
-#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 16px);bottom:80px;z-index:5;width:32px;height:32px;padding:6px;border:1px solid var(--se-column-line);border-radius:50%;background:var(--se-x-bg,#fff);color:var(--se-x-text,#536471);cursor:pointer}
-#site-enhancer-nav-toggle svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65}
+/* Sidebar toggle sits inside the nav rail: right-aligned above the account switcher when expanded, centered on the icon column when compact. */
+#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 52px);bottom:84px;z-index:5;display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:var(--se-toggle-bg,var(--se-x-bg,#fff));color:var(--se-toggle-fg,var(--se-x-muted,#536471));cursor:pointer;transition:background-color .15s,color .15s}
+#site-enhancer-nav-toggle[hidden]{display:none}
+:root[data-site-enhancer-compact-nav] #site-enhancer-nav-toggle{left:calc(var(--se-nav) / 2 - 20px)}
+#site-enhancer-nav-toggle:hover{background:color-mix(in srgb,currentColor 10%,var(--se-toggle-bg,var(--se-x-bg,#fff)));color:var(--se-x-text,var(--se-toggle-hover,#0f1419))}
+#site-enhancer-nav-toggle svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 #site-enhancer-nav-toggle:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 .se-column-divider[hidden]{display:none}
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
@@ -547,6 +551,8 @@ export function installXColumns(options: {
     empty: 'M5 4h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-5 3V5a1 1 0 0 1 1-1M8 8h8M8 12h5',
     loading: 'M20 12a8 8 0 1 1-8-8',
     error: 'M12 8v5M12 16v.01M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18',
+    collapseNav: 'M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4M9 4v16M16 9.5 13.5 12l2.5 2.5',
+    expandNav: 'M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4M9 4v16M13.5 9.5 16 12l-2.5 2.5',
   };
   function icon(name: keyof typeof paths) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -581,7 +587,7 @@ export function installXColumns(options: {
     navToggle.title = collapsed ? t.expandNav : t.collapseNav;
     navToggle.setAttribute('aria-label', navToggle.title);
     navToggle.setAttribute('aria-expanded', String(!collapsed));
-    const direction = collapsed ? 'forward' : 'back';
+    const direction = collapsed ? 'expandNav' : 'collapseNav';
     if (navToggle.dataset.direction !== direction) {
       navToggle.dataset.direction = direction;
       navToggle.replaceChildren(icon(direction));
@@ -793,8 +799,9 @@ export function installXColumns(options: {
     root.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
     panel.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
     panel.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
-    navToggle?.style.setProperty('background', 'var(--se-x-bg,' + (background === 'rgba(0, 0, 0, 0)' ? '#fff' : background) + ')');
-    navToggle?.style.setProperty('color', `var(--se-x-text,${dark ? '#e7e9ea' : '#536471'})`);
+    navToggle?.style.setProperty('--se-toggle-bg', `var(--se-x-bg,${background === 'rgba(0, 0, 0, 0)' ? '#fff' : background})`);
+    navToggle?.style.setProperty('--se-toggle-fg', `var(--se-x-muted,${dark ? '#939da6' : '#536471'})`);
+    navToggle?.style.setProperty('--se-toggle-hover', dark ? '#e7e9ea' : '#0f1419');
   }
   function adjust(kind: number, delta: number) {
     const width = viewportWidth();
