@@ -87,6 +87,7 @@ export function installXCopyMenu(): () => void {
     heights: Element[];
     maxHeight?: string;
     timer?: ReturnType<typeof setTimeout>;
+    shot?: { posts: HTMLElement[]; png: Promise<Blob> };
   };
   let session: Session | undefined;
   let disposed = false;
@@ -110,6 +111,28 @@ export function installXCopyMenu(): () => void {
     reset();
   }
 
+  // Rendering takes hundreds of milliseconds, so start once the menu is shown and
+  // reuse the result when the screenshot item is chosen.
+  function prepareShot(current: Session): Promise<Blob> {
+    const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
+    const shot = current.shot;
+    if (shot && shot.posts.length === posts.length && shot.posts.every((post, index) => post === posts[index])) {
+      // Retry once with the current DOM if the speculative render failed.
+      return shot.png.catch(() => renderPostScreenshot(posts));
+    }
+    const png = renderPostScreenshot(posts);
+    png.catch(() => {});
+    current.shot = { posts, png };
+    return png;
+  }
+
+  function prerender(current: Session) {
+    // Let the menu paint before cloning blocks the main thread.
+    requestAnimationFrame(() => setTimeout(() => {
+      if (session === current && !current.shot && !disposed && current.tweet.isConnected) prepareShot(current);
+    }, 0));
+  }
+
   function createItem(kind: 'link' | 'text' | 'url' | 'image', current: Session) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -124,8 +147,7 @@ export function installXCopyMenu(): () => void {
       event.stopPropagation();
       if (kind === 'image') {
         if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(labels.failed); return; }
-        const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
-        const png = renderPostScreenshot(posts);
+        const png = prepareShot(current);
         dismiss(current);
         closePreview?.();
         closePreview = showScreenshotPreview(document, png, current.trigger);
@@ -185,6 +207,7 @@ export function installXCopyMenu(): () => void {
     const image = createItem('image', current);
     link.style.color = text.style.color = url.style.color = image.style.color = color;
     nativeItem.before(link, text, url, image);
+    if (!current.shot) prerender(current);
   }
 
   const observer = new MutationObserver(syncMenu);

@@ -30,7 +30,8 @@ export async function renderPostScreenshot(posts: HTMLElement[]): Promise<Blob> 
   // Capture just the selected articles, never menus, the composer or intervening replies.
   const captures = await Promise.all(posts.map(post => toCanvas(post, {
     pixelRatio: 2, backgroundColor, includeQueryParams: true,
-    filter: node => !node.matches?.('[data-testid="caret"], [role="menu"], .site-enhancer-menuitem'),
+    // Drawing a cross-origin <video> frame taints the canvas; X overlays a poster <img> instead.
+    filter: node => !node.matches?.('[data-testid="caret"], [role="menu"], .site-enhancer-menuitem, video'),
     style: { transform: 'none', margin: '0' },
   })));
   const padding = 48, gap = 32; // 24px outer margin and 16px between posts at 2x.
