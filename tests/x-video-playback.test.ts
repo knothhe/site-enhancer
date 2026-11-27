@@ -1,8 +1,8 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { holdPreloadedAutoplay, VIDEO_PLAY_REQUEST } from '../utils/x-video-gate.ts';
-import { installXVideoPlayback, parseVideoVolume, VIDEO_VOLUME_KEY } from '../utils/x-video-playback.ts';
+import { DETAIL_PENDING_ATTR, holdPreloadedAutoplay, VIDEO_PLAY_REQUEST } from '../utils/x-video-gate.ts';
+import { installXVideoPlayback, isGifVideo, parseVideoVolume, VIDEO_VOLUME_KEY } from '../utils/x-video-playback.ts';
 
 let win: Window;
 let active: boolean;
@@ -253,4 +253,167 @@ test('a preloaded detail holds autoplay until it is first shown', async () => {
   await video.play();
   assert.equal(video.paused, false, 'later hiding is left to the timeline\'s rules');
   stop();
+});
+
+test('multi-video post keeps the earlier video playing against later-loaded sibling autoplay, while manual click switches', async () => {
+  start();
+  const article = document.createElement('article');
+  document.body.append(article);
+  const first = addVideo(document, article);
+  const second = addVideo(document, article);
+  const third = addVideo(document, article);
+  await first.video.play();
+  await assert.rejects(second.video.play());
+  await assert.rejects(third.video.play());
+  assert.equal(first.video.paused, false);
+  assert.equal(second.video.paused, true);
+  second.press('.play');
+  await second.video.play();
+  assert.equal(first.video.paused, true);
+  assert.equal(second.video.paused, false);
+  first.press('.play');
+  await first.video.play();
+  assert.equal(first.video.paused, false);
+  assert.equal(second.video.paused, true);
+});
+
+test('focal detail post video outranks reply videos both during autoplay and on attach convergence', async () => {
+  const detail = frameDocument();
+  const focal = detail.createElement('article');
+  const reply = detail.createElement('article');
+  detail.body.append(focal, reply);
+  const focalVideo = addVideo(detail, focal);
+  const replyVideo = addVideo(detail, reply);
+  playback = installXVideoPlayback({
+    blocked: doc => blocked.has(doc),
+    hidden: doc => hidden.has(doc),
+    expanded: () => undefined,
+    isPrimaryPost: video => focal.contains(video),
+  });
+  playback.attach(document);
+  // Both start playing before attach (e.g. during initial hydration); attach keeps the focal video.
+  await focalVideo.video.play();
+  await replyVideo.video.play();
+  playback.attach(detail);
+  assert.equal(focalVideo.video.paused, false);
+  assert.equal(replyVideo.video.paused, true);
+  await assert.rejects(replyVideo.video.play());
+  replyVideo.press('.play');
+  await replyVideo.video.play();
+  assert.equal(focalVideo.video.paused, true);
+  assert.equal(replyVideo.video.paused, false);
+});
+
+test('preloaded and pending detail frames suppress preload, hold all videos and resume only the first in DOM order', async () => {
+  const frame = document.createElement('iframe');
+  frame.hidden = true;
+  frame.setAttribute(DETAIL_PENDING_ATTR, '');
+  Object.defineProperty(win, 'frameElement', { configurable: true, value: frame });
+  const stop = holdPreloadedAutoplay(win as never);
+  const first = addVideo();
+  const second = addVideo();
+  first.video.setAttribute('preload', 'auto');
+  await assert.rejects(second.video.play());
+  await assert.rejects(first.video.play());
+  assert.equal(first.video.preload, 'none');
+  assert.equal(second.video.preload, 'none');
+  // Unhiding while still pending (visibility: hidden before attach) must keep holding.
+  frame.hidden = false; await tick();
+  assert.equal(first.video.paused, true);
+  assert.equal(second.video.paused, true);
+  // Clearing pending resumes only the first video in DOM order and restores preload attributes.
+  frame.removeAttribute(DETAIL_PENDING_ATTR); await tick();
+  assert.equal(first.video.getAttribute('preload'), 'auto');
+  assert.equal(second.video.getAttribute('preload'), null);
+  assert.equal(first.video.paused, false);
+  assert.equal(second.video.paused, true);
+  stop();
+});
+
+test('scrolling the active video out of the viewport pauses it and releases priority', async () => {
+  start();
+  const first = addVideo(), second = addVideo();
+  let top = 100;
+  first.video.getBoundingClientRect = () => ({ top, bottom: top + 200, left: 0, right: 300, width: 300, height: 200, x: 0, y: top, toJSON: () => ({}) } as DOMRect);
+  second.video.getBoundingClientRect = () => ({ top: 100, bottom: 300, left: 0, right: 300, width: 300, height: 200, x: 0, y: 100, toJSON: () => ({}) } as DOMRect);
+  first.press('.play');
+  await first.video.play();
+  await assert.rejects(second.video.play());
+  // Scroll first video completely above the viewport.
+  top = -300;
+  document.dispatchEvent(new win.Event('scroll') as unknown as Event);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.equal(first.video.paused, true);
+  await second.video.play();
+  assert.equal(second.video.paused, false);
+});
+
+test('GIF videos do not steal playback lock or get unmuted, while still respecting hidden documents', async () => {
+  const rules = start();
+  const detail = frameDocument(); rules.attach(detail);
+  const main = addVideo();
+  main.press('.volume [role="slider"]');
+  main.video.volume = 0.5;
+  main.video.muted = false;
+  await main.video.play();
+
+  const gifWrap = detail.createElement('div');
+  gifWrap.dataset.testid = 'tweetGif';
+  detail.body.append(gifWrap);
+  const gif = addVideo(detail, gifWrap);
+  gif.video.loop = true;
+  gif.video.muted = true;
+  assert.equal(isGifVideo(gif.video), true);
+  assert.equal(isGifVideo(main.video), false);
+
+  await gif.video.play();
+  await tick();
+  assert.equal(gif.video.paused, false);
+  assert.equal(main.video.paused, false, 'GIF must not pause the main video');
+  assert.equal(gif.video.muted, true, 'GIF must not be unmuted by shared volume');
+
+  hidden.add(detail);
+  gif.video.pause();
+  await assert.rejects(gif.video.play(), 'GIF in hidden detail cannot play');
+});
+
+test('volume sync skips hidden cached documents and falls back to muted if browser pauses unmute', async () => {
+  const rules = start();
+  const detail = frameDocument(); rules.attach(detail);
+  const feed = addVideo(), cached = addVideo(detail);
+  hidden.add(detail);
+  feed.press('.volume [role="slider"]');
+  feed.video.volume = 0.35;
+  assert.equal(cached.video.volume, 1, 'hidden cached document is skipped until shown');
+  hidden.delete(detail);
+  await cached.video.play(); await tick();
+  assert.equal(cached.video.volume, 0.35, 'volume applies lazily when cached video plays');
+
+  // Simulate browser autoplay policy pausing a playing video when unmuted programmatically.
+  const policyPlayer = document.createElement('div');
+  policyPlayer.dataset.testid = 'videoPlayer';
+  const policyVideo = document.createElement('video');
+  policyPlayer.append(policyVideo);
+  document.body.append(policyPlayer);
+  let mutedState = true;
+  let pausedState = false;
+  let volumeState = 1;
+  Object.defineProperties(policyVideo, {
+    paused: { configurable: true, get: () => pausedState },
+    ended: { configurable: true, get: () => false },
+    volume: { configurable: true, get: () => volumeState, set: (value: number) => { volumeState = value; } },
+    muted: {
+      configurable: true,
+      get: () => mutedState,
+      set: (value: boolean) => {
+        mutedState = value;
+        if (!value) pausedState = true;
+      },
+    },
+  });
+  policyVideo.play = () => { pausedState = false; return Promise.resolve(); };
+  policyVideo.dispatchEvent(new win.Event('loadedmetadata') as unknown as Event);
+  await tick();
+  assert.equal(mutedState, true, 'falls back to muted when unmute pauses playback');
+  assert.equal(pausedState, false, 'resumes muted playback after fallback');
 });

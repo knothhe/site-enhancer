@@ -2,6 +2,7 @@ import { PRIMARY as PRIMARY_COLUMN, PRIMARY_POST, POST, POST_LINK, TIMESTAMP, PL
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
 import { installXImageViewer } from './x-image-viewer.ts';
 import { installXVideoViewer } from './x-video-viewer.ts';
+import { DETAIL_PENDING_ATTR } from './x-video-gate.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
 import { resolveLocale, type Locale } from './i18n.ts';
@@ -205,7 +206,22 @@ export function installXColumns(options: {
 } = {}) {
   const root = document.documentElement;
   const imageViewer = installXImageViewer();
-  const videoViewer = installXVideoViewer();
+  const videoViewer = installXVideoViewer({
+    isPrimaryPost(video) {
+      const doc = video.ownerDocument;
+      if (doc === document) return false;
+      const article = video.closest('article');
+      if (!article) return false;
+      const card = video.closest('[role="link"]');
+      if (card && article.contains(card) && card !== article) return false;
+      if (selected) {
+        const permalink = detailUrl(postPermalink(article) ?? '', location.origin);
+        if (permalink) return permalink === selected;
+      }
+      const primary = doc.querySelector(PRIMARY_COLUMN);
+      return primary?.querySelector(POST) === article;
+    },
+  });
   let nativeCompact = false;
   let collapsed = false;
   let navToggle: HTMLButtonElement | undefined;
@@ -338,8 +354,9 @@ export function installXColumns(options: {
       entry.scrollX = entry.doc.defaultView?.scrollX || entry.doc.documentElement.scrollLeft;
       entry.scrollY = entry.doc.defaultView?.scrollY || entry.doc.documentElement.scrollTop;
       frame.hidden = true;
-      for (const media of entry.doc.querySelectorAll<HTMLMediaElement>('video,audio')) {
-        if (!media.paused) media.pause();
+      videoViewer.pause(entry.doc);
+      for (const audio of entry.doc.querySelectorAll<HTMLAudioElement>('audio')) {
+        if (!audio.paused) audio.pause();
       }
     } else discardFrame(frame);
   }
@@ -399,10 +416,14 @@ export function installXColumns(options: {
     if (event.type === 'pointermove' && article === hoverArticle) return;
     cancelHover();
     if (event.type === 'pointerout' || event.pointerType === 'touch' || !selected || !panel || loadingFrame || Date.now() - lastScroll < 200) return;
+    const hasVideo = Boolean(article.querySelector(`${PLAYER}, video`));
+    // Avoid hidden media-stream buffering competing with an actively playing video.
+    if (hasVideo && videoViewer.isPlaying()) return;
     hoverArticle = article;
     hoverTimer = setTimeout(() => {
       const url = detailUrl(postPermalink(article) ?? '', location.origin);
       if (!url || !selected || !panel || loadingFrame || !article.isConnected || readyFrames.has(url) || document.querySelector(X_OVERLAY_SELECTOR)) return;
+      if (hasVideo && videoViewer.isPlaying()) return;
       const current = makeFrame();
       current.hidden = true;
       hoverFrame = { url, frame: current };
@@ -412,7 +433,7 @@ export function installXColumns(options: {
         if (hoverFrame?.frame === current) cancelHover();
         else if (frame === current) failLoad(current, 'failedHint');
       });
-    }, 200);
+    }, hasVideo ? 450 : 200);
   }
   function follow(event: FocusEvent) {
     clearTimeout(followTimer);
@@ -486,6 +507,8 @@ export function installXColumns(options: {
     if (prepared) hoverFrame = undefined;
     cancelHover();
     const current = prepared?.frame ?? makeFrame();
+    // Hold autoplay in the frame until it is attached to playback rules and actually visible.
+    current.setAttribute(DETAIL_PENDING_ATTR, '');
     if (prepared) current.hidden = false;
     else if (options.prepareDetail) {
       void options.prepareDetail(url).then(prepared => {
@@ -525,6 +548,7 @@ export function installXColumns(options: {
             while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
             hidePrevious();
             current.style.visibility = '';
+            current.removeAttribute(DETAIL_PENDING_ATTR);
             status.hidden = true;
             retry.hidden = true;
             stopFrameWatch();

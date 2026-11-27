@@ -7,6 +7,8 @@ export type VideoVolume = { volume: number; muted: boolean };
 
 const DIALOG = '[role="dialog"],[aria-modal="true"]';
 const SCRUBBER = '[data-testid="scrubber"]';
+const GIF = '[data-testid="tweetGif"]';
+const DOCUMENT_POSITION_FOLLOWING = 4;
 /** X reacts to a volume control a little after the press, or while it is dragged. */
 const USER_VOLUME_MS = 1000;
 /** Stop correcting a video that something else keeps resetting, instead of fighting it. */
@@ -20,6 +22,24 @@ export function parseVideoVolume(value: string | null): VideoVolume | undefined 
 }
 function playerOf(node: Element | null) {
   return node?.closest<HTMLElement>(PLAYER) ?? node?.closest<HTMLElement>('[data-testid="videoComponent"]') ?? undefined;
+}
+/** X renders GIFs as looping muted <video> elements without scrubbers or sound controls. */
+export function isGifVideo(video: HTMLVideoElement) {
+  if (video.closest(GIF)) return true;
+  if (!video.loop) return false;
+  const player = playerOf(video);
+  if (!player) return false;
+  return !player.querySelector(`${SCRUBBER}, [role="slider"], svg[data-icon^="icon-sound-"]`);
+}
+function isInViewport(video: HTMLVideoElement) {
+  const view = video.ownerDocument.defaultView;
+  if (!view) return false;
+  const rect = video.getBoundingClientRect();
+  if (!rect.width && !rect.height) return true;
+  const width = view.innerWidth || video.ownerDocument.documentElement.clientWidth;
+  const height = view.innerHeight || video.ownerDocument.documentElement.clientHeight;
+  if (!width || !height) return true;
+  return rect.bottom > 0 && rect.top < height && rect.right > 0 && rect.left < width;
 }
 /** Whether a press is on a player's volume control: X pairs the mute button with the only slider
  * outside the scrubber. Labels are localized, so the structure identifies it. */
@@ -44,6 +64,8 @@ export function installXVideoPlayback(options: {
   /** Nothing plays in this document. */
   hidden: (doc: Document) => boolean;
   expanded: () => HTMLElement | undefined;
+  /** Optional semantic priority for the focal post in a detail document. */
+  isPrimaryPost?: (video: HTMLVideoElement) => boolean;
 }) {
   const documents = new Map<Document, () => void>();
   let holder: HTMLVideoElement | undefined;
@@ -56,20 +78,38 @@ export function installXVideoPlayback(options: {
   let corrections = new WeakMap<HTMLVideoElement, { count: number; time: number }>();
 
   const playing = (video: HTMLVideoElement | undefined) => !!video && !video.paused && !video.ended;
-  /** Autoplay < started in place < opened in X's media dialog < started in that dialog. */
+  const userPriority = (video: HTMLVideoElement) => chosen?.contains(video) || Boolean(video.closest(DIALOG));
+  const activeHolder = (video: HTMLVideoElement | undefined) => {
+    if (!playing(video) || !video!.isConnected) return false;
+    if (options.expanded()?.contains(video!) || video!.ownerDocument.pictureInPictureElement === video) return true;
+    return isInViewport(video!);
+  };
+  /** Autoplay < focal detail post < started in place < opened in X's media dialog < started in that dialog. */
   function rank(video: HTMLVideoElement) {
-    return (chosen?.contains(video) ? 1 : 0) + (video.closest(DIALOG) ? 2 : 0);
+    return (options.isPrimaryPost?.(video) ? 1 : 0) + (chosen?.contains(video) ? 2 : 0) + (video.closest(DIALOG) ? 4 : 0);
   }
   function allowed(video: HTMLVideoElement) {
     const doc = video.ownerDocument;
     const expanded = options.expanded();
     if (expanded) return expanded.contains(video);
     if (options.hidden(doc)) return false;
+    const user = userPriority(video);
+    if (isGifVideo(video)) return user || !options.blocked(doc);
+    if (!user && options.blocked(doc)) return false;
+    if (!holder || holder === video || !activeHolder(holder)) return true;
     const own = rank(video);
-    if (!own && options.blocked(doc)) return false;
-    if (!holder || holder === video || !playing(holder)) return true;
     const other = rank(holder);
-    return own > other || (own === other && !displaced.has(video));
+    if (own > other) return true;
+    if (own < other || displaced.has(video)) return false;
+    // In a multi-video post, keep the earlier video playing instead of letting later-loaded siblings steal focus.
+    if (!user && holder.ownerDocument === doc) {
+      const article = video.closest('article');
+      if (article && article === holder.closest('article') &&
+        (holder.compareDocumentPosition(video) & DOCUMENT_POSITION_FOLLOWING)) {
+        return false;
+      }
+    }
+    return true;
   }
   function stop(video: HTMLVideoElement) {
     displaced.add(video);
@@ -80,6 +120,7 @@ export function installXVideoPlayback(options: {
     // Its play event can arrive after another video has already stopped it.
     if (video.paused) return;
     if (!allowed(video)) { stop(video); return; }
+    if (isGifVideo(video)) return;
     const before = holder;
     holder = video;
     displaced.delete(video);
@@ -92,7 +133,7 @@ export function installXVideoPlayback(options: {
     return activation(video.ownerDocument.defaultView) || (video.ownerDocument !== document && activation(window));
   }
   function applyVolume(video: HTMLVideoElement) {
-    if (!volume || !documents.has(video.ownerDocument)) return;
+    if (!volume || !documents.has(video.ownerDocument) || isGifVideo(video)) return;
     const level = Math.abs(video.volume - volume.volume) > .001;
     const mute = video.muted !== volume.muted && (volume.muted || canUnmute(video));
     if (!level && !mute) return;
@@ -101,12 +142,23 @@ export function installXVideoPlayback(options: {
     const count = recent && now - recent.time < USER_VOLUME_MS ? recent.count : 0;
     if (count >= MAX_CORRECTIONS) return;
     corrections.set(video, { count: count + 1, time: count ? recent!.time : now });
+    const wasPlaying = !video.paused && !video.ended;
     if (level) video.volume = volume.volume;
-    if (mute) video.muted = volume.muted;
+    if (mute) {
+      video.muted = volume.muted;
+      // If browser autoplay policy pauses a cross-frame video upon unmuting, fall back to muted playback.
+      if (!volume.muted && wasPlaying && video.paused) {
+        video.muted = true;
+        void video.play()?.catch(() => {});
+      }
+    }
   }
   function applyAll(except?: HTMLVideoElement) {
     documents.forEach((_dispose, doc) => {
-      for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) if (video !== except) applyVolume(video);
+      if (options.hidden(doc)) return;
+      for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) {
+        if (video !== except && (!video.paused || isInViewport(video))) applyVolume(video);
+      }
     });
   }
   /** X reads the element again in its own listener, so change it only after that has run. */
@@ -153,7 +205,7 @@ export function installXVideoPlayback(options: {
     }
     function volumechange(event: Event) {
       const video = asVideo(event);
-      if (!video) return;
+      if (!video || isGifVideo(video)) return;
       if (userChanged(video)) remember(video);
       else later(() => { if (!userChanged(video)) applyVolume(video); });
     }
@@ -173,22 +225,44 @@ export function installXVideoPlayback(options: {
       // The first interaction lifts the browser's unmute restriction.
       if (volume && !volume.muted) later(() => applyAll());
     }
+    let scrollPending = false;
+    function checkScrolledOut() {
+      scrollPending = false;
+      if (!holder || holder.ownerDocument !== doc || !playing(holder)) return;
+      if (options.expanded()?.contains(holder) || doc.pictureInPictureElement === holder) return;
+      if (!isInViewport(holder)) {
+        const out = holder;
+        if (chosen?.contains(out)) chosen = undefined;
+        holder = undefined;
+        out.pause();
+      }
+    }
+    function onScroll() {
+      if (scrollPending || !holder || holder.ownerDocument !== doc) return;
+      scrollPending = true;
+      const schedule = doc.defaultView?.requestAnimationFrame ?? ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 16));
+      schedule(checkScrolledOut);
+    }
     const listeners: Array<[string, (event: Event) => void]> = [
       [VIDEO_PLAY_REQUEST, request], ['play', play], ['loadedmetadata', ready], ['volumechange', volumechange],
       ['pointerdown', gesture], ['keydown', gesture], ['pointerup', release], ['pointercancel', release], ['keyup', release],
     ];
     for (const [type, listener] of listeners) doc.addEventListener(type, listener, true);
+    doc.addEventListener('scroll', onScroll, { capture: true, passive: true });
     if (!documents.size) {
       readVolume();
       window.addEventListener('storage', stored);
     }
     documents.set(doc, () => {
       for (const [type, listener] of listeners) doc.removeEventListener(type, listener, true);
+      doc.removeEventListener('scroll', onScroll, true);
       if (chosen?.ownerDocument === doc) chosen = undefined;
       if (press?.player.ownerDocument === doc) press = undefined;
       if (holder?.ownerDocument === doc) holder = undefined;
     });
-    for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) { settle(video); applyVolume(video); }
+    const videos = Array.from(doc.querySelectorAll<HTMLVideoElement>('video'));
+    const prioritized = [...videos].sort((a, b) => rank(b) - rank(a));
+    for (const video of prioritized) { settle(video); applyVolume(video); }
   }
   function detach(doc: Document) {
     documents.get(doc)?.();
@@ -198,10 +272,12 @@ export function installXVideoPlayback(options: {
     attach,
     detach,
     settle,
+    isPlaying: () => activeHolder(holder),
     /** Pause everything in a document except the expanded video, forgetting what the user started there. */
     pause(doc: Document) {
       const expanded = options.expanded();
       if (chosen?.ownerDocument === doc && chosen !== expanded) chosen = undefined;
+      if (holder?.ownerDocument === doc && !expanded?.contains(holder)) holder = undefined;
       for (const video of doc.querySelectorAll<HTMLVideoElement>('video')) {
         if (!video.paused && !expanded?.contains(video)) video.pause();
       }

@@ -1594,3 +1594,51 @@ test('a column missing between routes keeps the layout, and a lasting absence re
   t.mock.timers.tick(STRUCTURE_GRACE_MS);
   assert.equal(document.getElementById('site-enhancer-columns'), null);
 });
+
+test('detail multi-video post prioritizes first focal video, expands paused siblings directly into playback, and skips video hover preload while playing', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const prepared: string[] = [];
+  columns = installXColumns({ prepareDetail: async url => { prepared.push(url); return url; } });
+  columns.setEnabled(true);
+  // Add a second feed post containing a video to test hover preload throttling while playing.
+  const secondPost = document.createElement('article');
+  secondPost.dataset.testid = 'tweet';
+  secondPost.innerHTML = '<a href="https://x.com/bob/status/999"><time>Now</time></a><div data-testid="videoPlayer"><video></video></div>';
+  document.querySelector('[data-testid="primaryColumn"]')!.append(secondPost);
+
+  const frame = selectDetail(123);
+  assert.equal(frame.hasAttribute('data-site-enhancer-detail-pending'), true, 'pending attribute holds playback until ready');
+  await Promise.resolve();
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const first = addVideo(detail.document as unknown as Document);
+  const second = addVideo(detail.document as unknown as Document);
+  const replyArticle = detail.document.createElement('article');
+  replyArticle.dataset.testid = 'tweet';
+  replyArticle.innerHTML = '<a href="https://x.com/carol/status/456"><time>Now</time></a>';
+  detail.document.querySelector('[data-testid="primaryColumn"]')!.append(replyArticle);
+  const reply = addVideo(detail.document as unknown as Document);
+  replyArticle.append(reply.player as unknown as typeof replyArticle);
+  signalDetail(detail);
+  assert.equal(frame.hasAttribute('data-site-enhancer-detail-pending'), false, 'pending attribute clears once attached and visible');
+
+  first.play();
+  assert.equal(first.video.paused, false);
+  second.play();
+  reply.play();
+  assert.equal(first.video.paused, false, 'later sibling and reply autoplay do not steal from first focal video');
+  assert.equal(second.video.paused, true);
+  assert.equal(reply.video.paused, true);
+
+  // Hovering a video post in the timeline while a detail video is actively playing skips speculative video preload.
+  const countBeforeHover = prepared.length;
+  secondPost.dispatchEvent(new win.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }) as unknown as Event);
+  t.mock.timers.tick(500);
+  assert.equal(prepared.length, countBeforeHover);
+
+  // Expanding the paused second video starts it immediately and pauses the first.
+  second.video.play = () => { second.play(); return Promise.resolve(); };
+  second.player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!
+    .dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
+  assert.equal(first.video.paused, true);
+  assert.equal(second.video.paused, false);
+});

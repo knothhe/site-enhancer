@@ -12,6 +12,8 @@ const BUTTON = 'data-site-enhancer-video-expand';
 const CSS = `
 ${PLAYER} video{object-fit:contain!important}
 [${BUTTON}]{position:absolute;right:10px;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
+[${BUTTON}][data-compact]{padding:6px}
+[${BUTTON}][data-compact] span{display:none}
 [${BUTTON}]:hover{background:#303640}
 [${BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}
 [${BUTTON}] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;pointer-events:none}
@@ -21,15 +23,19 @@ ${PLAYER}[${EXPANDED}]>div{height:100%!important;max-height:100%!important}
 /* X uses a padding spacer inside its absolutely positioned player. */
 ${PLAYER}[${EXPANDED}]>div>div[style*="padding-bottom"]{display:none!important}
 ${PLAYER}[${EXPANDED}] video{object-fit:contain!important}
-${PLAYER}[${EXPANDED}] [${BUTTON}]{top:12px;right:24px;min-height:34px}
+${PLAYER}[${EXPANDED}] [${BUTTON}]{top:12px;right:24px;min-height:34px;padding:6px 10px}
+${PLAYER}[${EXPANDED}] [${BUTTON}][data-compact] span{display:inline}
 @media(max-width:600px){${PLAYER}[${EXPANDED}]{padding:58px 8px 8px!important}${PLAYER}[${EXPANDED}] [${BUTTON}]{right:12px}}
 `;
 
 /** Keep X's actual player (including its MediaSource, controls and event handlers)
  * in place. A popover promotes it to the top layer without cloning or moving it. */
-export function installXVideoViewer() {
+export function installXVideoViewer(options: {
+  isPrimaryPost?: (video: HTMLVideoElement) => boolean;
+} = {}) {
   const documents = new Map<Document, { dispose: () => void; frame?: HTMLIFrameElement }>();
   let feedPaused = false;
+  let interruptedFeedVideo: HTMLVideoElement | undefined;
   let expanded: { player: HTMLElement; close: () => void } | undefined;
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
     ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看' }
@@ -42,6 +48,7 @@ export function installXVideoViewer() {
     blocked,
     hidden: doc => doc !== document && blocked(doc),
     expanded: () => expanded?.player,
+    isPrimaryPost: options.isPrimaryPost,
   });
   function close() { expanded?.close(); }
 
@@ -73,6 +80,8 @@ export function installXVideoViewer() {
       doc.removeEventListener('keydown', keydown, true);
       player.removeEventListener('toggle', toggle);
       button.querySelector('span')!.textContent = labels().expand;
+      button.title = labels().expand;
+      button.setAttribute('aria-label', labels().expand);
       button.setAttribute('aria-expanded', 'false');
       if (blocked(doc)) playback.pause(doc);
       if (focus?.isConnected) focus.focus({ preventScroll: true });
@@ -102,11 +111,15 @@ export function installXVideoViewer() {
     frame?.setAttribute(FRAME, '');
     try { player.showPopover(); } catch { restore(); return; }
     documents.forEach((_entry, other) => playback.pause(other));
+    const targetVideo = player.querySelector<HTMLVideoElement>('video');
+    if (targetVideo?.paused) void targetVideo.play()?.catch(() => {});
     isolate(player);
     if (frame) isolate(frame);
     doc.addEventListener('keydown', keydown, true);
     player.addEventListener('toggle', toggle);
     button.querySelector('span')!.textContent = labels().close;
+    button.title = labels().close;
+    button.setAttribute('aria-label', labels().close);
     button.setAttribute('aria-expanded', 'true');
     button.focus({ preventScroll: true });
   }
@@ -131,6 +144,8 @@ export function installXVideoViewer() {
       }
       if (existing) {
         existing.video = video;
+        const width = player.getBoundingClientRect().width;
+        existing.button.toggleAttribute('data-compact', width > 0 && width < 260);
         if (!player.contains(existing.button)) player.append(existing.button);
         return;
       }
@@ -140,8 +155,12 @@ export function installXVideoViewer() {
       button.setAttribute(BUTTON, '');
       button.setAttribute('aria-expanded', 'false');
       button.setAttribute('aria-haspopup', 'dialog');
+      const width = player.getBoundingClientRect().width;
+      button.toggleAttribute('data-compact', width > 0 && width < 260);
       button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span></span>';
       button.querySelector('span')!.textContent = labels().expand;
+      button.title = labels().expand;
+      button.setAttribute('aria-label', labels().expand);
       players.set(player, { button, video });
       player.append(button);
     }
@@ -223,15 +242,32 @@ export function installXVideoViewer() {
       if (doc !== document) playback.detach(doc);
     },
     close,
+    pause(doc: Document) {
+      playback.pause(doc);
+    },
+    isPlaying: () => playback.isPlaying(),
     setFeedPaused(value: boolean) {
       feedPaused = value;
       if (value) {
         if (expanded?.player.ownerDocument === document) close();
+        const active = Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
+          .find(video => !video.paused && !video.ended);
+        if (active) interruptedFeedVideo = active;
         playback.pause(document);
+      } else {
+        const resume = interruptedFeedVideo;
+        interruptedFeedVideo = undefined;
+        if (resume?.isConnected && resume.paused && !playback.isPlaying()) {
+          const rect = resume.getBoundingClientRect();
+          const visible = (!rect.width && !rect.height) ||
+            (rect.bottom > 0 && rect.top < (window.innerHeight || document.documentElement.clientHeight));
+          if (visible) void resume.play()?.catch(() => {});
+        }
       }
     },
     remove() {
       close();
+      interruptedFeedVideo = undefined;
       for (const [doc, entry] of documents) {
         entry.dispose();
         if (doc !== document) playback.detach(doc);
