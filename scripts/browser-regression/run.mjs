@@ -32,6 +32,7 @@ const BROWSERS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const results = [];
+const screenshotTimings = [];
 let failures = 0;
 let cleanupStarted = false;
 let browserProcess;
@@ -385,6 +386,58 @@ await step('X More menu (keyboard)', async () => {
   equal('mouse: second post copied with its own link', await page.clipboard(), [{ text: 'Another post\nhttps://x.com/carol/status/42\n#X', via: 'clipboard' }]);
 });
 
+await step('X screenshot preview and PNG copy', async () => {
+  for (const menuDwellMs of [0, 250]) {
+    const page = await openPage({ url: 'https://x.com/home?lang=en' });
+    try {
+      await page.waitFor('X menu installed', `return [...document.querySelectorAll('style')].some(s => s.textContent.includes('site-enhancer-menuitem'));`);
+      await page.eval(`
+        const marker = document.createElement('span');
+        marker.style.cssText = 'position:absolute;inset:calc(50% - 8px) auto auto calc(50% - 8px);width:16px;height:16px;background:#3478ad';
+        document.querySelector('#t1').append(marker);
+        const observer = new MutationObserver(() => {
+          const item = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent === 'Copy post as image');
+          if (!item) return;
+          observer.disconnect();
+          const select = () => {
+            const start = performance.now();
+            item.click();
+            const frame = () => {
+              const preview = document.querySelector('.se-screenshot-preview[open]');
+              const graphic = preview?.querySelector('.se-shot-body canvas, .se-shot-body img');
+              if (!graphic?.getBoundingClientRect().width || !preview.querySelector('[data-copy]:enabled')) {
+                requestAnimationFrame(frame);
+                return;
+              }
+              window.shotResult = {
+                readyMs: Math.round(performance.now() - start),
+                width: graphic.naturalWidth ?? graphic.width,
+                height: graphic.naturalHeight ?? graphic.height,
+              };
+            };
+            requestAnimationFrame(frame);
+          };
+          if (${menuDwellMs}) setTimeout(select, ${menuDwellMs});
+          else select();
+        });
+        observer.observe(document.body, { subtree: true, childList: true });`);
+      await page.click('#t1 [data-testid="caret"]');
+      const { readyMs, width, height } = await page.waitFor('screenshot preview', 'return window.shotResult;');
+      screenshotTimings.push({ menuDwellMs, readyMs });
+      log(`  Screenshot visible and copy enabled after ${readyMs} ms (menu open for ${menuDwellMs} ms).`);
+      check('preview displays the selected post', width > 96 && height > 96, { width, height });
+      await page.click('.se-screenshot-preview [data-copy]');
+      await page.waitFor('copied PNG', `return document.documentElement.hasAttribute('data-se-test-clipboard');`);
+      equal('PNG has the preview dimensions, opaque padding and fixture content', await page.clipboard(), [{
+        type: 'image/png', signature: [137, 80, 78, 71, 13, 10, 26, 10], width, height,
+        corner: [255, 255, 255, 255], center: [52, 120, 173, 255],
+      }]);
+    } finally {
+      await page.close();
+    }
+  }
+});
+
 await step('X More menu (Chinese page)', async () => {
   const page = await openPage({ url: 'https://x.com/home?lang=zh-CN' });
   await page.waitFor('content scripts', `return [...document.querySelectorAll('style')].some(s => s.textContent.includes('site-enhancer-menuitem'));`);
@@ -555,7 +608,7 @@ const offline = blocked.filter(url => !url.startsWith('data:'));
 log(`\n${offline.length ? `Blocked ${offline.length} non-fixture request(s): ${offline.slice(0, 5).join(', ')}` : 'No non-fixture requests.'}`);
 const passed = results.filter(r => r.ok).length;
 writeFileSync(join(outDir, 'report.json'), JSON.stringify({
-  browser: browserPath, headless: !headed, extensionId: extId, passed, failed: failures, blocked: offline, results,
+  browser: browserPath, headless: !headed, extensionId: extId, passed, failed: failures, blocked: offline, screenshotTimings, results,
 }, null, 2));
 log(`${passed} passed, ${failures} failed. Screenshots and report.json: ${outDir}`);
 clearTimeout(watchdog);

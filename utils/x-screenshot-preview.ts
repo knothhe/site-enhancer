@@ -3,8 +3,23 @@ import { resolveLocale } from './i18n.ts';
 export type ScreenshotPreviewOptions = {
   filename?: string;
   hasParent?: boolean;
-  rerender?: (opts: { hideMetrics: boolean; includeParent: boolean }) => Promise<Blob>;
+  onClose?: () => void;
+  rerender?: (opts: { hideMetrics: boolean; includeParent: boolean }) => Promise<HTMLCanvasElement>;
 };
+
+const screenshotPngs = new WeakMap<HTMLCanvasElement, Promise<Blob>>();
+
+/** Share the PNG of a finished screenshot between menu preparation and export. */
+export function encodeScreenshot(canvas: HTMLCanvasElement): Promise<Blob> {
+  const cached = screenshotPngs.get(canvas);
+  if (cached) return cached;
+  const png = new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('PNG encoding failed')), 'image/png');
+  });
+  screenshotPngs.set(canvas, png);
+  void png.catch(() => screenshotPngs.delete(canvas));
+  return png;
+}
 
 function isDarkHost(doc: Document): boolean {
   const view = doc.defaultView;
@@ -25,7 +40,7 @@ function isDarkHost(doc: Document): boolean {
 /** Preview and copy/download the exact same PNG. Closing invalidates pending rendering. */
 export function showScreenshotPreview(
   doc: Document,
-  png: Promise<Blob>,
+  initialCanvas: Promise<HTMLCanvasElement>,
   trigger: HTMLElement,
   options: ScreenshotPreviewOptions = {},
 ): () => void {
@@ -33,13 +48,13 @@ export function showScreenshotPreview(
   const zh = resolveLocale(doc.documentElement.lang || view.navigator?.language) === 'zh';
   const text = zh ? {
     title: '截图预览', loading: '正在生成截图…', copy: '复制图片', download: '下载 PNG', close: '关闭',
-    ready: '确认截图后复制或下载', copied: '已复制图片', downloaded: '已开始下载',
-    failed: '截图生成失败，请关闭后重试', copyFailed: '复制失败，请重试',
+    ready: '确认截图后复制或下载', copying: '正在复制…', copied: '已复制图片', downloading: '正在准备下载…', downloaded: '已开始下载',
+    failed: '截图生成失败，请关闭后重试', copyFailed: '复制失败，请重试', downloadFailed: '下载失败，请重试',
     hideMetrics: '隐藏互动数据', includeParent: '包含原推文',
   } : {
     title: 'Screenshot preview', loading: 'Creating screenshot…', copy: 'Copy image', download: 'Download PNG', close: 'Close',
-    ready: 'Review your screenshot before copying or saving', copied: 'Image copied', downloaded: 'Download started',
-    failed: 'Screenshot failed. Close and try again.', copyFailed: 'Copy failed. Please try again.',
+    ready: 'Review your screenshot before copying or saving', copying: 'Copying…', copied: 'Image copied', downloading: 'Preparing download…', downloaded: 'Download started',
+    failed: 'Screenshot failed. Close and try again.', copyFailed: 'Copy failed. Please try again.', downloadFailed: 'Download failed. Please try again.',
     hideMetrics: 'Hide metrics', includeParent: 'Include original post',
   };
   const dark = isDarkHost(doc);
@@ -61,8 +76,7 @@ export function showScreenshotPreview(
 .se-screenshot-preview button:disabled{opacity:.5;cursor:wait}
 .se-screenshot-preview button:focus-visible{outline:2px solid var(--se-x-accent,#1769d2);outline-offset:2px}
 .se-screenshot-preview .se-shot-body{min-height:100px;overflow:auto;overscroll-behavior:contain;padding:20px;background:var(--se-x-raised,#e9edf2);scrollbar-color:#9aa4b2 transparent}
-.se-screenshot-preview img{display:block;width:100%;height:auto;max-width:100%;margin:auto;box-shadow:0 2px 12px #0002}
-.se-screenshot-preview img[hidden]{display:none}
+.se-screenshot-preview canvas{display:block;width:100%;height:auto;max-width:100%;margin:auto;box-shadow:0 2px 12px #0002}
 .se-screenshot-preview [role=status]{margin:0;flex:1;font-size:13px;color:var(--se-x-muted,inherit)}
 .se-screenshot-preview[data-dark]{background:var(--se-x-bg,#20242b);color:var(--se-x-text,#f0f2f5);border-color:var(--se-x-border,#414852)}
 .se-screenshot-preview[data-dark] .se-shot-body{background:var(--se-x-raised,#12151a);scrollbar-color:#59616c transparent}
@@ -74,8 +88,6 @@ export function showScreenshotPreview(
   closeButton.type = 'button'; closeButton.textContent = '×';
   closeButton.setAttribute('aria-label', text.close);
   const body = doc.createElement('div'); body.className = 'se-shot-body';
-  const image = doc.createElement('img'); image.alt = text.title; image.hidden = true;
-  body.append(image);
   const footer = doc.createElement('footer'), status = doc.createElement('p');
   status.setAttribute('role', 'status'); status.textContent = text.loading;
   const download = doc.createElement('button'); download.type = 'button'; download.dataset.download = '';
@@ -85,33 +97,37 @@ export function showScreenshotPreview(
   header.append(title, closeButton);
   footer.append(status, download, copy);
 
-  let closed = false, url: string | undefined, blob: Blob | undefined, renderGeneration = 0;
+  let closed = false, renderGeneration = 0;
+  let png: Promise<Blob> | undefined, downloadUrl: string | undefined;
   let hideMetrics = false, includeParent = Boolean(options.hasParent);
 
-  function loadBlob(pending: Promise<Blob>) {
-    const gen = ++renderGeneration;
-    blob = undefined;
+  function clearExport() {
+    png = undefined;
+    if (downloadUrl) view.URL.revokeObjectURL(downloadUrl);
+    downloadUrl = undefined;
     copy.disabled = true;
     download.disabled = true;
+  }
+
+  function loadCanvas(pending: Promise<HTMLCanvasElement>) {
+    const gen = ++renderGeneration;
+    clearExport();
     status.textContent = text.loading;
-    void pending.then(async value => {
+    void pending.then(canvas => {
       if (closed || gen !== renderGeneration) return;
-      const nextUrl = view.URL.createObjectURL(value);
-      image.src = nextUrl;
-      await image.decode().catch(() => {});
-      if (closed || gen !== renderGeneration) {
-        view.URL.revokeObjectURL(nextUrl);
-        return;
-      }
-      if (url) view.URL.revokeObjectURL(url);
-      url = nextUrl;
-      blob = value;
-      image.hidden = false;
+      canvas.setAttribute('role', 'img');
+      canvas.setAttribute('aria-label', text.title);
+      body.replaceChildren(canvas);
       copy.disabled = false;
       download.disabled = false;
       status.textContent = text.ready;
+      // Display the rendered pixels directly while the browser encodes the shared export.
+      png = encodeScreenshot(canvas);
+      return png;
     }).catch(() => {
-      if (!closed && gen === renderGeneration) status.textContent = text.failed;
+      if (closed || gen !== renderGeneration) return;
+      clearExport();
+      status.textContent = text.failed;
     });
   }
 
@@ -127,7 +143,7 @@ export function showScreenshotPreview(
       input.checked = checked;
       input.addEventListener('change', () => {
         onChange(input.checked);
-        loadBlob(rerender({ hideMetrics, includeParent }));
+        loadCanvas(rerender({ hideMetrics, includeParent }));
       });
       label.append(input, labelText);
       return label;
@@ -145,26 +161,46 @@ export function showScreenshotPreview(
   function close() {
     if (closed) return;
     closed = true;
-    if (url) view.URL.revokeObjectURL(url);
+    clearExport();
+    body.replaceChildren();
     dialog.remove();
     if (trigger.isConnected) trigger.focus({ preventScroll: true });
+    options.onClose?.();
   }
   async function performCopy() {
-    if (!blob || closed || copy.disabled) return;
+    const selected = png;
+    if (!selected || copy.disabled) return;
     copy.disabled = true;
+    status.textContent = text.copying;
     try {
-      await view.navigator.clipboard.write([new view.ClipboardItem({ 'image/png': blob })]);
-      if (!closed) status.textContent = text.copied;
-    } catch { if (!closed) status.textContent = text.copyFailed; }
-    finally { if (!closed) copy.disabled = false; }
+      // Start the clipboard write inside the click gesture, even while PNG encoding is pending.
+      await view.navigator.clipboard.write([new view.ClipboardItem({ 'image/png': selected })]);
+      if (png === selected) status.textContent = text.copied;
+    } catch {
+      if (png === selected) status.textContent = text.copyFailed;
+    } finally {
+      if (png === selected) copy.disabled = false;
+    }
   }
-  function performDownload() {
-    if (!blob || !url || closed || download.disabled) return;
-    const anchor = doc.createElement('a');
-    anchor.href = url;
-    anchor.download = options.filename || 'x-post.png';
-    anchor.click();
-    status.textContent = text.downloaded;
+  async function performDownload() {
+    const selected = png;
+    if (!selected || download.disabled) return;
+    download.disabled = true;
+    status.textContent = text.downloading;
+    try {
+      const blob = await selected;
+      if (png !== selected) return;
+      downloadUrl ??= view.URL.createObjectURL(blob);
+      const anchor = doc.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = options.filename || 'x-post.png';
+      anchor.click();
+      status.textContent = text.downloaded;
+    } catch {
+      if (png === selected) status.textContent = text.downloadFailed;
+    } finally {
+      if (png === selected) download.disabled = false;
+    }
   }
 
   closeButton.addEventListener('click', close);
@@ -188,6 +224,6 @@ export function showScreenshotPreview(
   copy.addEventListener('click', () => { void performCopy(); });
   download.addEventListener('click', performDownload);
   doc.body.append(dialog); dialog.showModal(); closeButton.focus();
-  loadBlob(png);
+  loadCanvas(initialCanvas);
   return close;
 }

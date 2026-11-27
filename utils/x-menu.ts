@@ -1,6 +1,6 @@
 import { POST as TWEET, PRIMARY, TEXT, MENU_TRIGGER as CARET, TIMESTAMP, PHOTO_IMAGE } from './x-dom.ts';
-import { showScreenshotPreview } from './x-screenshot-preview.ts';
-import { renderPostScreenshot, screenshotPosts, type ScreenshotOptions } from './x-screenshot.ts';
+import { encodeScreenshot, showScreenshotPreview } from './x-screenshot-preview.ts';
+import { renderPostScreenshot, screenshotPosts } from './x-screenshot.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { createToast } from './toast.ts';
 import { resolveLocale } from './i18n.ts';
@@ -51,6 +51,10 @@ export function getTweetData(tweet: Element): { text: string; url: string } {
   const textElement = Array.from(tweet.querySelectorAll(TEXT))
     .find(element => belongsToTweet(element, tweet));
   const text = textElement ? readText(textElement).trim() : '';
+  return { text, url: tweetPermalink(tweet) };
+}
+
+function tweetPermalink(tweet: Element): string {
   const links = Array.from(tweet.querySelectorAll<HTMLAnchorElement>('a[href*="/status/"]'))
     .filter(link => belongsToTweet(link, tweet));
   // The timestamp is the primary permalink; media/analytics links are fallbacks.
@@ -64,10 +68,10 @@ export function getTweetData(tweet: Element): { text: string; url: string } {
     }
     const match = url.pathname.match(/^\/(?:[\w]+|i\/web)\/status\/\d+(?=\/|$)/);
     if (/(^|\.)(?:x|twitter)\.com$/.test(url.hostname) && match) {
-      return { text, url: `${url.origin}${match[0]}` };
+      return `${url.origin}${match[0]}`;
     }
   }
-  return { text, url: '' };
+  return '';
 }
 
 function authorFromUrl(url: string): string | undefined {
@@ -93,13 +97,13 @@ export function formatTweetCopy(data: { text: string; url: string }, format: XCo
 export function collectThreadPosts(tweet: HTMLElement): HTMLElement[] {
   const doc = tweet.ownerDocument;
   if (!/^\/(?:\w+|i\/web)\/status\/\d+(?:\/|$)/.test(doc.location.pathname)) return [];
-  const baseAuthor = authorFromUrl(getTweetData(tweet).url)?.toLowerCase();
+  const baseAuthor = authorFromUrl(tweetPermalink(tweet))?.toLowerCase();
   if (!baseAuthor) return [];
   const scope = tweet.closest(PRIMARY) ?? doc;
   const all = Array.from(scope.querySelectorAll<HTMLElement>(TWEET));
   const index = all.indexOf(tweet);
   if (index < 0) return [];
-  const matchesAuthor = (el: HTMLElement) => authorFromUrl(getTweetData(el).url)?.toLowerCase() === baseAuthor;
+  const matchesAuthor = (el: HTMLElement) => authorFromUrl(tweetPermalink(el))?.toLowerCase() === baseAuthor;
   let start = index;
   while (start > 0 && matchesAuthor(all[start - 1])) start--;
   let end = index;
@@ -194,7 +198,8 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
     heights: Element[];
     maxHeight?: string;
     timer?: ReturnType<typeof setTimeout>;
-    shot?: { posts: HTMLElement[]; png: Promise<Blob> };
+    idleCapture?: number;
+    shot?: { posts: HTMLElement[]; canvas: Promise<HTMLCanvasElement>; observer: MutationObserver };
   };
   let session: Session | undefined;
   let disposed = false;
@@ -204,6 +209,8 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
     observer.disconnect();
     if (!session) return;
     clearTimeout(session.timer);
+    if (session.idleCapture !== undefined) window.cancelIdleCallback(session.idleCapture);
+    session.shot?.observer.disconnect();
     session.menu?.querySelectorAll(`.${ITEM}`).forEach(item => item.remove());
     session.menu?.classList.remove(MENU);
     if (session.menu) session.menu.style.maxHeight = session.maxHeight ?? '';
@@ -218,25 +225,26 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
     reset();
   }
 
-  // Rendering is triggered on pointerenter/focus of the screenshot item (and cached fonts
-  // make captures fast without wasting CPU when opening the menu for unrelated actions).
-  function prepareShot(current: Session, opts?: ScreenshotOptions): Promise<Blob> {
-    const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
-    const shot = !opts?.hideMetrics ? current.shot : undefined;
-    if (shot && shot.posts.length === posts.length && shot.posts.every((post, index) => post === posts[index])) {
-      // Retry once with the current DOM if the speculative render failed.
-      return shot.png.catch(() => renderPostScreenshot(posts, opts));
-    }
-    const png = renderPostScreenshot(posts, opts);
-    png.catch(() => {});
-    if (!opts?.hideMetrics) current.shot = { posts, png };
-    return png;
-  }
-
-  function prerenderOnIntent(current: Session) {
-    if (session === current && !current.shot && !disposed && current.tweet.isConnected) {
-      prepareShot(current);
-    }
+  function prepareShot(current: Session) {
+    if (session !== current || current.shot || !current.tweet.isConnected) return;
+    const posts = screenshotPosts(current.tweet, tweetPermalink);
+    // X may update or recycle either article while the menu is open.
+    const invalidate = () => {
+      changes.disconnect();
+      if (current.shot?.observer === changes) current.shot = undefined;
+    };
+    const changes = new MutationObserver(invalidate);
+    for (const post of posts) changes.observe(post, {
+      childList: true, subtree: true, characterData: true, attributes: true,
+    });
+    const canvas = renderPostScreenshot(posts);
+    current.shot = { posts, canvas, observer: changes };
+    void canvas.then(image => {
+      if (session === current && current.shot?.canvas === canvas) {
+        // A user who selects the warmed item can copy the same PNG immediately.
+        void encodeScreenshot(image).catch(() => {});
+      }
+    }, invalidate);
   }
 
   function createItem(kind: 'link' | 'text' | 'url' | 'image' | 'thread', current: Session) {
@@ -250,7 +258,7 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
     label.textContent = labels[kind];
     button.appendChild(label);
     if (kind === 'image') {
-      const warm = () => prerenderOnIntent(current);
+      const warm = () => prepareShot(current);
       button.addEventListener('pointerenter', warm, { once: true });
       button.addEventListener('focus', warm, { once: true });
     }
@@ -259,15 +267,20 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
       event.stopPropagation();
       const t = getLabels();
       if (kind === 'image') {
-        if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(t.failed); return; }
-        const allPosts = screenshotPosts(current.tweet, node => getTweetData(node).url);
+        if (!current.tweet.isConnected || tweetPermalink(current.tweet) !== current.data.url) { toast.show(t.failed); return; }
+        const allPosts = screenshotPosts(current.tweet, tweetPermalink);
         const hasParent = allPosts.length > 1;
-        const png = prepareShot(current);
+        const shot = current.shot;
+        const canvas = shot && !shot.observer.takeRecords().length &&
+          shot.posts.length === allPosts.length && allPosts.every((post, index) => post === shot.posts[index])
+          ? shot.canvas.catch(() => renderPostScreenshot(allPosts))
+          : renderPostScreenshot(allPosts);
         const tweetNode = current.tweet;
         const filename = screenshotFilename(current.data.url);
         dismiss(current);
         closePreview?.();
-        closePreview = showScreenshotPreview(document, png, current.trigger, {
+        closePreview = showScreenshotPreview(document, canvas, current.trigger, {
+          onClose: () => { closePreview = undefined; },
           filename,
           hasParent,
           rerender: ({ hideMetrics, includeParent }) => {
@@ -318,6 +331,9 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
         .find(menu => !current.existing.has(menu) && menu.getClientRects().length > 0);
       if (!current.menu) return;
       clearTimeout(current.timer);
+      if (window.requestIdleCallback) {
+        current.idleCapture = window.requestIdleCallback(() => prepareShot(current));
+      }
       current.maxHeight = current.menu.style.maxHeight;
       current.menu.classList.add(MENU);
       observer.observe(current.menu, {
