@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { getTweetData, installXCopyMenu } from '../utils/x-menu.ts';
+import { collectThreadPosts, formatThreadMarkdown, formatTweetCopy, getTweetData, installXCopyMenu } from '../utils/x-menu.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 
 let win: Window;
@@ -223,4 +223,64 @@ test('offers screenshot copying even for posts without text', async () => {
   const portal = await open(tweet(''));
   const item = Array.from(portal.querySelectorAll('.site-enhancer-menuitem')).find(node => node.textContent === 'Copy post as image');
   assert.ok(item);
+});
+
+test('unwraps non-truncated t.co links while preserving truncated display text', () => {
+  const full = tweet('Check <a href="https://t.co/abc123">example.com/docs</a> and <a href="https://t.co/xyz">https://foo.bar/a</a>');
+  assert.equal(getTweetData(full).text, 'Check https://example.com/docs and https://foo.bar/a');
+  const truncated = tweet('See <a href="https://t.co/trunc">example.com/very/long…</a>');
+  assert.equal(getTweetData(truncated).text, 'See example.com/very/long…');
+});
+
+test('formats tweet copy output for default, plain and markdown templates', () => {
+  const data = { text: 'Line 1\nLine 2', url: 'https://x.com/alice/status/123' };
+  assert.equal(formatTweetCopy(data, 'default'), 'Line 1\nLine 2\nhttps://x.com/alice/status/123\n#X');
+  assert.equal(formatTweetCopy(data, 'plain'), 'Line 1\nLine 2\nhttps://x.com/alice/status/123');
+  assert.equal(formatTweetCopy(data, 'markdown'), '> Line 1\n> Line 2\n\n— @alice [X](https://x.com/alice/status/123)');
+});
+
+test('reacts to dynamic html lang changes on subsequent menu opens', async () => {
+  document.documentElement.lang = 'en';
+  cleanup = installXCopyMenu({ getCopyFormat: () => 'plain' });
+  const first = await open(tweet('Hello', '1'));
+  assert.equal(first.querySelector('.site-enhancer-menuitem')?.textContent, 'Copy post with link');
+  first.remove();
+  await flush();
+  document.documentElement.lang = 'zh-CN';
+  const second = await open(tweet('你好', '2'));
+  const item = second.querySelector<HTMLButtonElement>('.site-enhancer-menuitem')!;
+  assert.equal(item.textContent, '复制推文和链接');
+  item.click();
+  await flush();
+  assert.deepEqual(copied, ['你好\nhttps://x.com/author/status/2']);
+});
+
+test('collects multi-post author thread on status page and offers thread markdown copy', async () => {
+  win.happyDOM.setURL('https://x.com/author/status/10');
+  const main = document.createElement('div');
+  main.dataset.testid = 'primaryColumn';
+  const p1 = tweet('First part', '10');
+  const p2 = tweet('Second part', '11');
+  const reply = document.createElement('article');
+  reply.dataset.testid = 'tweet';
+  reply.innerHTML = '<a href="/someone/status/12"><time>Now</time></a><div data-testid="tweetText">Other reply</div>';
+  main.append(p1, p2, reply);
+  document.body.append(main);
+  const thread = collectThreadPosts(p1 as unknown as HTMLElement);
+  assert.equal(thread.length, 2);
+  const md = formatThreadMarkdown(thread);
+  assert.match(md, /# @author Thread/);
+  assert.match(md, /First part/);
+  assert.match(md, /Second part/);
+  assert.ok(!md.includes('Other reply'));
+
+  cleanup = installXCopyMenu();
+  const portal = await open(p1);
+  const items = portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem');
+  assert.equal(items.length, 5);
+  assert.equal(items[4].textContent, 'Copy thread (Markdown)');
+  items[4].click();
+  await flush();
+  assert.equal(copied.length, 1);
+  assert.match(copied[0], /First part[\s\S]*Second part/);
 });

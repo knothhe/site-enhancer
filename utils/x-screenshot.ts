@@ -1,5 +1,21 @@
 import { PRIMARY, POST } from './x-dom.ts';
-import { toCanvas } from 'html-to-image';
+import { getFontEmbedCSS, toCanvas } from 'html-to-image';
+
+export type ScreenshotOptions = {
+  hideMetrics?: boolean;
+};
+
+const fontCssCache = new WeakMap<Document, Promise<string>>();
+
+/** Cache embedded @font-face CSS once per document so subsequent captures skip font fetching/encoding. */
+function cachedFontEmbedCSS(doc: Document, sample: HTMLElement): Promise<string> {
+  let pending = fontCssCache.get(doc);
+  if (!pending) {
+    pending = getFontEmbedCSS(sample).catch(() => '');
+    fontCssCache.set(doc, pending);
+  }
+  return pending;
+}
 
 /** Only attach the page's focal post when capturing a reply below it. */
 export function screenshotPosts(tweet: HTMLElement, permalink: (node: Element) => string): HTMLElement[] {
@@ -24,18 +40,25 @@ export function screenshotBackground(node: HTMLElement): string {
   return '#ffffff';
 }
 
-export async function renderPostScreenshot(posts: HTMLElement[]): Promise<Blob> {
+export async function renderPostScreenshot(posts: HTMLElement[], options: ScreenshotOptions = {}): Promise<Blob> {
   if (!posts.length || posts.some(post => !post.isConnected)) throw new Error('Post unavailable');
+  const doc = posts[0].ownerDocument;
   const backgroundColor = screenshotBackground(posts[0]);
+  const fontEmbedCSS = await cachedFontEmbedCSS(doc, posts[0]);
+  const hideMetrics = Boolean(options.hideMetrics);
   // Capture just the selected articles, never menus, the composer or intervening replies.
   const captures = await Promise.all(posts.map(post => toCanvas(post, {
-    pixelRatio: 2, backgroundColor, includeQueryParams: true,
+    pixelRatio: 2, backgroundColor, includeQueryParams: true, fontEmbedCSS,
     // Drawing a cross-origin <video> frame taints the canvas; X overlays a poster <img> instead.
-    filter: node => !node.matches?.('[data-testid="caret"], [role="menu"], .site-enhancer-menuitem, video'),
+    filter: node => {
+      if (node.matches?.('[data-testid="caret"], [role="menu"], .site-enhancer-menuitem, video')) return false;
+      if (hideMetrics && node.matches?.('[role="group"]')) return false;
+      return true;
+    },
     style: { transform: 'none', margin: '0' },
   })));
   const padding = 48, gap = 32; // 24px outer margin and 16px between posts at 2x.
-  const canvas = posts[0].ownerDocument.createElement('canvas');
+  const canvas = doc.createElement('canvas');
   canvas.width = Math.max(...captures.map(image => image.width)) + padding * 2;
   canvas.height = captures.reduce((height, image) => height + image.height, 0) + padding * 2 + gap * (captures.length - 1);
   if (canvas.width * canvas.height > 64_000_000) throw new Error('Screenshot too large');

@@ -1,4 +1,5 @@
 import { PRIMARY as PRIMARY_COLUMN, PRIMARY_POST, POST, POST_LINK, TIMESTAMP, PLAYER, WEB, COLUMN_MAIN, focusedPost, isNativeRoute } from './x-dom.ts';
+import { copyToClipboard } from './clipboard.ts';
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
 import { installXImageViewer } from './x-image-viewer.ts';
 import { installXVideoViewer } from './x-video-viewer.ts';
@@ -181,7 +182,7 @@ const zh = {
   loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
   frameTitle: '推文详情和回复', panel: '推文详情', title: '推文详情',
   failed: '详情暂时无法加载', failedHint: '请重新加载扩展和页面后重试，或在新标签页查看。', retryHint: '可以重试，或在新标签页查看。',
-  newTab: '新标签页', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复栏宽', close: '关闭',
+  newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复栏宽', close: '关闭',
   resizeNav: '调整导航栏宽度', resizeDetail: '调整时间线和详情宽度', resizeHint: '拖动调整宽度；方向键微调；双击恢复默认',
 };
 
@@ -195,7 +196,7 @@ export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
     loading: 'Loading post…', loadingHint: 'The timeline stays where it is.',
     frameTitle: 'Post and replies', panel: 'Post details', title: 'Post',
     failed: 'Couldn’t load the post', failedHint: 'Reload the extension and the page, then try again, or open it in a new tab.', retryHint: 'Try again, or open it in a new tab.',
-    newTab: 'New tab', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset widths', close: 'Close',
+    newTab: 'New tab', copyLink: 'Copy link', copiedLink: 'Link copied', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset widths', close: 'Close',
     resizeNav: 'Resize navigation', resizeDetail: 'Resize timeline and post', resizeHint: 'Drag to resize; arrow keys to nudge; double-click to reset',
   },
 };
@@ -247,6 +248,7 @@ export function installXColumns(options: {
   sheet.textContent = COLUMNS_CSS;
   (document.head ?? root).append(sheet);
   let enabled = false;
+  let mediaEnhanced = false;
   let disposed = false;
   let panel: HTMLElement | undefined;
   let frame: HTMLIFrameElement | undefined;
@@ -259,6 +261,8 @@ export function installXColumns(options: {
   let previous: HTMLIFrameElement | undefined;
   let status: HTMLElement;
   let openLink: HTMLAnchorElement;
+  let copyLinkButton: HTMLButtonElement;
+  let copyLinkTimer: ReturnType<typeof setTimeout> | undefined;
   let retry: HTMLButtonElement;
   let dividers: HTMLElement[] = [];
   let selected: string | undefined;
@@ -376,6 +380,7 @@ export function installXColumns(options: {
     selectedOffset = undefined;
     locatePending = false;
     openLink.hidden = true;
+    copyLinkButton.hidden = true;
     retry.hidden = true;
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
@@ -416,6 +421,7 @@ export function installXColumns(options: {
     if (event.type === 'pointermove' && article === hoverArticle) return;
     cancelHover();
     if (event.type === 'pointerout' || event.pointerType === 'touch' || !selected || !panel || loadingFrame || Date.now() - lastScroll < 200) return;
+    if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
     const hasVideo = Boolean(article.querySelector(`${PLAYER}, video`));
     // Avoid hidden media-stream buffering competing with an actively playing video.
     if (hasVideo && videoViewer.isPlaying()) return;
@@ -482,6 +488,7 @@ export function installXColumns(options: {
     videoViewer.setFeedPaused(true);
     openLink.href = url;
     openLink.hidden = false;
+    copyLinkButton.hidden = false;
     retry.hidden = true;
     const cached = readyFrames.get(url);
     if (cached && reusable(url, cached)) {
@@ -571,6 +578,8 @@ export function installXColumns(options: {
     search: 'M21 21l-4.5-4.5M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15',
     reset: 'M4 4v5h5M4 9a8 8 0 1 1-1 7',
     external: 'M14 4h6v6M20 4l-9 9M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5',
+    copy: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
+    check: 'M5 12.5l4.5 4.5L19 7.5',
     close: 'M6 6l12 12M18 6L6 18',
     empty: 'M5 4h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-5 3V5a1 1 0 0 1 1-1M8 8h8M8 12h5',
     loading: 'M20 12a8 8 0 1 1-8-8',
@@ -643,12 +652,28 @@ export function installXColumns(options: {
     iconControl(openLink, 'newTab', 'external');
     openLink.target = '_blank';
     openLink.rel = 'noopener noreferrer';
+    copyLinkButton = button('copyLink', () => {
+      if (!selected) return;
+      void copyToClipboard(selected).then(ok => {
+        if (!ok || disposed || !copyLinkButton.isConnected) return;
+        clearTimeout(copyLinkTimer);
+        copyLinkButton.replaceChildren(icon('check'));
+        copyLinkButton.title = t.copiedLink;
+        copyLinkButton.setAttribute('aria-label', t.copiedLink);
+        copyLinkTimer = setTimeout(() => {
+          if (disposed || !copyLinkButton.isConnected) return;
+          copyLinkButton.replaceChildren(icon('copy'));
+          copyLinkButton.title = t.copyLink;
+          copyLinkButton.setAttribute('aria-label', t.copyLink);
+        }, 1600);
+      });
+    }, 'copy');
     retry = button('retry', () => { if (selected) openDetail(selected); });
     backButton = button('back', () => history.back(), 'back');
     forwardButton = button('forward', () => history.forward(), 'forward');
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    toolbar.append(title, backButton, forwardButton, openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -853,8 +878,14 @@ export function installXColumns(options: {
     hidePrevious();
     cancelHover();
     clearTimeout(followTimer);
+    clearTimeout(copyLinkTimer);
+    copyLinkTimer = undefined;
     imageViewer.close();
-    videoViewer.remove();
+    if (!mediaEnhanced) videoViewer.remove();
+    else {
+      videoViewer.close();
+      videoViewer.setFeedPaused(false);
+    }
     navToggle?.remove();
     navToggle = undefined;
     if (selected || frame) options.releaseDetail?.();
@@ -929,10 +960,13 @@ export function installXColumns(options: {
     if (native && event.defaultPrevented) dismissMenus(source);
   }
   function openFromClick(event: MouseEvent) {
-    if (!panel || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
-    if (!target?.closest(PRIMARY_COLUMN) || !target.closest(POST) || !active()) return;
-    if (imageViewer.handleClick(event)) return;
+    if (!target?.closest(PRIMARY_COLUMN) || !target.closest(POST)) return;
+    if ((panel && active()) || mediaEnhanced) {
+      if (imageViewer.handleClick(event)) return;
+    }
+    if (!panel || !active()) return;
     if (target.closest(PLAYER) || target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoComponent"],[contenteditable="true"]')) return;
     if (target.ownerDocument.defaultView?.getSelection()?.toString()) return;
     const link = target.closest<HTMLAnchorElement>('a[href]');
@@ -1046,7 +1080,13 @@ export function installXColumns(options: {
   window.addEventListener('storage', storage);
   window.addEventListener('message', detailReady);
   return {
-    setEnabled(value: boolean) { enabled = value; videoViewer.setPlayback(value); refresh(); },
+    setEnabled(value: boolean) { enabled = value; videoViewer.setPlayback(value || mediaEnhanced); refresh(); },
+    setMediaEnhanced(value: boolean) {
+      mediaEnhanced = value;
+      videoViewer.setPlayback(enabled || mediaEnhanced);
+      if (mediaEnhanced && document.body) videoViewer.attach(document);
+      else if (!enabled && !mediaEnhanced) { imageViewer.close(); videoViewer.remove(); }
+    },
     onNavigate() {
       // Dialog routes such as quote and compose keep the timeline underneath, so keep its detail too.
       if (panel && !history.restore() && !isXOverlayRoute(location.pathname)) closeDetail(false);
@@ -1055,11 +1095,13 @@ export function installXColumns(options: {
     },
     remove() {
       disposed = true;
+      mediaEnhanced = false;
       structureObserver.disconnect();
       if (structureFrame !== undefined) window.cancelAnimationFrame(structureFrame);
       videoViewer.setPlayback(false);
       langObserver.disconnect();
       unmount();
+      videoViewer.remove();
       sheet.remove();
       history.remove();
       document.removeEventListener('focusin', follow);

@@ -5,7 +5,10 @@ import { getUrlVariants, type UrlVariants } from '../../utils/url';
 import { getTextDownload, getTextFilename, readTextPage, type TextPage } from '../../utils/text-download';
 import { isXHost, X_STYLE_OPTIONS, X_STYLES, type XStyle } from '../../utils/x-style';
 import { X_THEME_NAMES, X_THEMES, xThemeLabel, type XTheme } from '../../utils/x-theme';
-import { xStyleSetting, xThemeSetting } from '../../utils/x-settings';
+import {
+  X_COPY_FORMATS, xCopyFormatSetting, xDefaultFollowingSetting, xStyleSetting, xThemeSetting,
+  type XCopyFormat,
+} from '../../utils/x-settings';
 import { browserLocale, type Locale } from '../../utils/i18n';
 import { MESSAGES } from './messages';
 import './App.css';
@@ -18,8 +21,8 @@ type CopyState = { status: 'idle' } | { status: 'copying' | 'copied' | 'failed';
 type DownloadState = 'idle' | 'preparing' | 'started' | 'failed';
 
 /** Loads a stored setting and saves changes optimistically, reverting on failure. */
-function useSetting<T extends string>(setting: { get(): Promise<T>; set(value: T): Promise<void> }) {
-  const [value, setValue] = useState<T>('original' as T);
+function useSetting<T>(setting: { get(): Promise<T>; set(value: T): Promise<void> }, initial: T) {
+  const [value, setValue] = useState<T>(initial);
   const [failed, setFailed] = useState(false);
   const current = useRef(value);
   const changed = useRef(false);
@@ -64,8 +67,10 @@ function App({ locale = browserLocale() }: { locale?: Locale }) {
   const [page, setPage] = useState<PageState>({ status: 'loading' });
   const [copy, setCopy] = useState<CopyState>({ status: 'idle' });
   const [download, setDownload] = useState<DownloadState>('idle');
-  const [xStyle, setXStyle, xStyleFailed] = useSetting<XStyle>(xStyleSetting);
-  const [xTheme, setXTheme, xThemeFailed] = useSetting<XTheme>(xThemeSetting);
+  const [xStyle, setXStyle, xStyleFailed] = useSetting<XStyle>(xStyleSetting, 'original');
+  const [xTheme, setXTheme, xThemeFailed] = useSetting<XTheme>(xThemeSetting, 'original');
+  const [xCopyFormat, setXCopyFormat, xCopyFormatFailed] = useSetting<XCopyFormat>(xCopyFormatSetting, 'default');
+  const [xDefaultFollowing, setXDefaultFollowing, xDefaultFollowingFailed] = useSetting<boolean>(xDefaultFollowingSetting, false);
   const requestId = useRef(0);
   const copying = useRef(false);
   const downloading = useRef(false);
@@ -148,7 +153,7 @@ function App({ locale = browserLocale() }: { locale?: Locale }) {
   const downloadFeedback = download === 'failed' ? t.downloadFailed
     : download === 'started' ? t.downloadStarted
       : download === 'preparing' ? t.downloadPreparing : '';
-  const settingsFailed = xStyleFailed || xThemeFailed;
+  const settingsFailed = xStyleFailed || xThemeFailed || xCopyFormatFailed || xDefaultFollowingFailed;
   const notice = copy.status === 'failed' ? feedback : download === 'failed' ? downloadFeedback : '';
 
   return (
@@ -252,6 +257,32 @@ function App({ locale = browserLocale() }: { locale?: Locale }) {
             ))}
           </div>
         </div>
+        <div className="se-field">
+          <span className="se-field-name" id="x-copy-format-label">{t.copyFormat}</span>
+          <div className="se-seg" role="radiogroup" aria-labelledby="x-copy-format-label">
+            {X_COPY_FORMATS.map(value => (
+              <label key={value} className={xCopyFormat === value ? 'on' : undefined} title={t.copyFormats[value].title}>
+                <input
+                  type="radio"
+                  name="x-copy-format"
+                  value={value}
+                  checked={xCopyFormat === value}
+                  onChange={() => void setXCopyFormat(value)}
+                />
+                <span>{t.copyFormats[value].label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <label className="se-toggle" title={t.defaultFollowingTitle}>
+          <span className="se-field-name">{t.defaultFollowing}</span>
+          <input
+            type="checkbox"
+            checked={xDefaultFollowing}
+            onChange={event => void setXDefaultFollowing(event.target.checked)}
+          />
+          <span className="se-switch" aria-hidden="true" />
+        </label>
         <p className={settingsFailed ? 'se-alert' : 'sr-only'} role="status" aria-live="polite">
           {settingsFailed ? t.settingsFailed : ''}
         </p>

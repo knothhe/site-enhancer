@@ -13,6 +13,8 @@ const ICONS = {
   retry: 'M4 4v5h5M4 9a8 8 0 1 1-1 7',
   help: 'M9 9a3 3 0 1 1 5 2c-2 1-2 2-2 3M12 17h.01M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18',
   copy: 'M9 9h12v12H9zM15 9V3H3v12h6',
+  download: 'M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
+  rotate: 'M21 12a9 9 0 1 1-3-6.7L21 8m0-5v5h-5',
 };
 /** One top-level viewer shared by timeline and same-origin detail documents. */
 export function installXImageViewer() {
@@ -156,17 +158,18 @@ export function installXImageViewer() {
     }
     const help = document.createElement('p');
     help.className = 'se-image-help';
-    help.textContent = zh ? '← → / 触摸板横滑切图 · + / − 缩放 · C 复制图片 · ? 快捷键 · Esc 关闭' : '← → / Swipe to browse · + / − Zoom · C Copy image · ? Shortcuts · Esc Close';
+    help.textContent = zh ? '← → / 触摸板横滑切图 · + / − 缩放 · C 复制 · E 下载 · T 旋转 · ? 快捷键 · Esc 关闭' : '← → / Swipe to browse · + / − Zoom · C Copy · E Download · T Rotate · ? Shortcuts · Esc Close';
     const shortcuts = document.createElement('div');
     shortcuts.className = 'se-image-shortcuts';
     shortcuts.id = 'se-image-shortcuts';
     shortcuts.hidden = true;
     shortcuts.textContent = zh
-      ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；C 复制图片；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
-      : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; C: copy image; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
+      ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；C 复制图片；E 下载原图；T 旋转 90°；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
+      : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; C: copy image; E: download original; T: rotate 90°; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
     const scaleLabel = document.createElement('span');
     scaleLabel.className = 'se-image-scale';
     let scale = 1;
+    let rotation = 0;
     let fitted = true;
     let loaded = false;
     let dismissStart: { x: number; y: number } | undefined;
@@ -260,6 +263,39 @@ export function installXImageViewer() {
     copyStatus.setAttribute('role', 'status');
     const copy = button(zh ? '复制图片' : 'Copy image', () => { void copyImage(); }, 'copy', 'C');
     copy.disabled = true;
+    const download = button(zh ? '下载原图' : 'Download original', () => { void downloadImage(); }, 'download', 'E');
+    download.disabled = true;
+    const rotate = button(zh ? '旋转 90°' : 'Rotate 90°', rotateImage, 'rotate', 'T');
+    rotate.disabled = true;
+    function rotateImage() {
+      if (!loaded) return;
+      rotation = (rotation + 90) % 360;
+      img.style.transform = rotation ? `rotate(${rotation}deg)` : '';
+    }
+    async function downloadImage() {
+      if (download.disabled || disposed || displayedIndex < 0) return;
+      download.disabled = true;
+      copyStatus.textContent = zh ? '正在下载原图…' : 'Downloading image…';
+      try {
+        const src = photos[displayedIndex].src;
+        const response = await fetch(src, { credentials: 'omit' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (disposed) return;
+        const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg';
+        const objectUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = `x-image-${displayedIndex + 1}.${ext}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        copyStatus.textContent = zh ? '已开始下载原图' : 'Download started';
+      } catch {
+        if (!disposed) copyStatus.textContent = zh ? '下载失败，请重试' : 'Download failed. Please try again.';
+      } finally {
+        if (!disposed) download.disabled = !loaded || displayedIndex !== index;
+      }
+    }
     async function copyImage() {
       if (copy.disabled || disposed) return;
       const controller = new AbortController();
@@ -294,7 +330,7 @@ export function installXImageViewer() {
     helpButton.setAttribute('aria-controls', shortcuts.id);
     function show(value: number, fromSwipe = false) {
       copyController?.abort(); copyController = undefined;
-      copy.disabled = true; copyStatus.textContent = '';
+      copy.disabled = true; download.disabled = true; rotate.disabled = true; copyStatus.textContent = '';
       if (!fromSwipe) stopSwipe();
       clearPreview();
       index = Math.max(0, Math.min(photos.length - 1, value));
@@ -318,7 +354,7 @@ export function installXImageViewer() {
       current.setAttribute('aria-busy', 'true');
       // Returning to the still-visible image cancels the pending switch without resetting its view.
       if (displayedIndex === index) {
-        copy.disabled = false;
+        copy.disabled = false; download.disabled = false; rotate.disabled = false;
         current.removeAttribute('aria-busy'); render(); return;
       }
       const targetIndex = index;
@@ -328,9 +364,10 @@ export function installXImageViewer() {
         const apply = () => {
           if (request !== generation || dialog !== current) return;
           img = candidate;
+          rotation = 0; img.style.transform = '';
           img.hidden = true; img.removeAttribute('data-pending');
           loaded = true; displayedIndex = targetIndex;
-          copy.disabled = false;
+          copy.disabled = false; download.disabled = false; rotate.disabled = false;
           decoded.set(targetIndex, img);
           notice.hidden = true; retry.hidden = true; feedback.textContent = '';
           current.removeAttribute('aria-busy');
@@ -509,7 +546,7 @@ export function installXImageViewer() {
     });
     current.addEventListener('click', event => { if (event.target === current) close(); });
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(type, endDrag);
-    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, zoomOut, scaleLabel, zoomIn, fit, actual, copy, previous, next, helpButton);
+    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, zoomOut, scaleLabel, zoomIn, fit, actual, rotate, copy, download, previous, next, helpButton);
     canvas.append(img); stage.append(canvas);
     notice.append(feedback, retry);
     viewport.append(stage, sidePrevious, sideNext, notice);
@@ -539,6 +576,8 @@ export function installXImageViewer() {
       else if (key === '0' || key === 'f') action = fitImage;
       else if (key === '1') action = () => zoom(1);
       else if (key === 'c') action = () => { if (!event.repeat) void copyImage(); };
+      else if (key === 'e') action = () => { if (!event.repeat) void downloadImage(); };
+      else if (key === 't') action = () => { if (!event.repeat) rotateImage(); };
       else if (key === 'r' && !retry.hidden) action = () => show(index);
       else if (key === 'home') action = () => navigate(0);
       else if (key === 'end') action = () => navigate(photos.length - 1);

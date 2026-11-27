@@ -31,6 +31,14 @@ const zh = {
   xPage: 'X 页面',
   layout: '布局',
   theme: '主题',
+  copyFormat: '复制格式',
+  copyFormats: {
+    default: { label: '默认', title: '正文 + 链接 + #X' },
+    plain: { label: '纯文本', title: '正文 + 链接，不带 #X' },
+    markdown: { label: 'MD', title: 'Markdown 引用格式（含作者与链接）' },
+  },
+  defaultFollowing: '主页默认「正在关注」',
+  defaultFollowingTitle: '进入 X 主页时自动切到「正在关注」标签',
   settingsFailed: '设置保存失败，请重试。',
 };
 
@@ -67,6 +75,14 @@ const en: Messages = {
   xPage: 'X page',
   layout: 'Layout',
   theme: 'Theme',
+  copyFormat: 'Copy',
+  copyFormats: {
+    default: { label: 'Default', title: 'Post text + URL + #X' },
+    plain: { label: 'Plain', title: 'Post text + URL without #X' },
+    markdown: { label: 'MD', title: 'Markdown blockquote with author and link' },
+  },
+  defaultFollowing: 'Default to Following',
+  defaultFollowingTitle: 'Automatically switch Home from For you to Following',
   settingsFailed: 'Couldn’t save the setting. Please try again.',
 };
 

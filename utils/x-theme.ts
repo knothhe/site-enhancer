@@ -206,17 +206,27 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
 
   // React Native Web inserts rules with insertRule, which mutation observers cannot see.
   // Poll quickly while the page boots, then settle to a cheap once-per-second check.
+  // Pause while the tab is hidden, and skip polling altogether on x-web (CSS variables only).
   function schedule() {
+    clearTimeout(timer);
+    timer = undefined;
+    if (activeTheme === 'original' || document.hidden || root.hasAttribute('data-app-version')) return;
     timer = setTimeout(() => { refresh(); schedule(); }, Date.now() - startedAt < 5000 ? 200 : 1000);
   }
 
   function refresh() {
-    if (!document.body) return;
-    const sheets = Array.from(document.styleSheets);
+    if (!document.body || activeTheme === 'original') return;
+    const isXWeb = root.hasAttribute('data-app-version');
     const webTone = root.getAttribute('data-theme');
-    const next = `${webTone}|${document.body.style.backgroundColor}|${sheets.length}|${sheets.reduce((sum, sheet) => {
-      try { return sum + sheet.cssRules.length; } catch { return sum; }
-    }, 0)}`;
+    let next: string;
+    if (isXWeb) {
+      next = `xweb|${webTone}|${document.body.style.backgroundColor}`;
+    } else {
+      const sheets = Array.from(document.styleSheets);
+      next = `${webTone}|${document.body.style.backgroundColor}|${sheets.length}|${sheets.reduce((sum, sheet) => {
+        try { return sum + sheet.cssRules.length; } catch { return sum; }
+      }, 0)}`;
+    }
     if (next === signature) return;
     signature = next;
     const tone = webTone === 'dark' || webTone === 'light' ? webTone : detectXTone(document.body.style.backgroundColor || getComputedStyle(document.body).backgroundColor);
@@ -225,8 +235,29 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
     if (mode) {
       try { localStorage.setItem(TONE_CACHE_KEY, mode); } catch { /* Optional cache. */ }
     }
-    rulesStyle.textContent = tone && !root.hasAttribute('data-app-version') ? buildXThemeCss(liveRules(), tone, SCOPE) : '';
+    rulesStyle.textContent = tone && !isXWeb ? buildXThemeCss(liveRules(), tone, SCOPE) : '';
   }
+
+  function onVisibilityChange() {
+    if (activeTheme === 'original') return;
+    if (document.hidden) {
+      clearTimeout(timer);
+      timer = undefined;
+    } else {
+      refresh();
+      schedule();
+    }
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange);
+
+  const webToneObserver = typeof MutationObserver !== 'undefined'
+    ? new MutationObserver(() => {
+      if (activeTheme === 'original') return;
+      refresh();
+      if (root.hasAttribute('data-app-version')) { clearTimeout(timer); timer = undefined; }
+    })
+    : undefined;
+  webToneObserver?.observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-app-version'] });
 
   function setTheme(theme: XTheme) {
     activeTheme = theme;
@@ -260,6 +291,8 @@ export function installXTheme(initial: XTheme = readCachedXTheme()) {
     setTheme,
     remove() {
       stopRepairs();
+      webToneObserver?.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       clearTimeout(timer);
       // A newer instance that replaced these stylesheets now owns the page state.
       if (!paletteStyle.isConnected) return;

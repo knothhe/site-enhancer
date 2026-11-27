@@ -1,8 +1,10 @@
-import { POST as TWEET, TEXT, MENU_TRIGGER as CARET, TIMESTAMP } from './x-dom.ts';
+import { POST as TWEET, PRIMARY, TEXT, MENU_TRIGGER as CARET, TIMESTAMP, PHOTO_IMAGE } from './x-dom.ts';
 import { showScreenshotPreview } from './x-screenshot-preview.ts';
-import { renderPostScreenshot, screenshotPosts } from './x-screenshot.ts';
+import { renderPostScreenshot, screenshotPosts, type ScreenshotOptions } from './x-screenshot.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { createToast } from './toast.ts';
+import { resolveLocale } from './i18n.ts';
+import type { XCopyFormat } from './x-settings.ts';
 
 const ITEM = 'site-enhancer-menuitem';
 const MENU = 'site-enhancer-menu';
@@ -11,6 +13,7 @@ const icons = {
   image: 'M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm1 2v14h14V5H5zm1 12 4-5 3 3 2-2 3 4H6zm2-7a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   link: 'M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z',
   text: 'M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z',
+  thread: 'M4 5h16v2H4V5zm0 6h16v2H4v-2zm0 6h11v2H4v-2z',
 };
 
 // Quoted posts can share the outer article, but live inside a separate link.
@@ -22,12 +25,25 @@ function belongsToTweet(element: Element, tweet: Element): boolean {
     || !element.querySelector(TEXT);
 }
 
+/** Restore non-truncated t.co display links to full https:// URLs when copying text. */
+function unwrapAnchorText(anchor: Element): string {
+  const raw = Array.from(anchor.childNodes, readText).join('');
+  const href = anchor.getAttribute('href') ?? '';
+  if (!/^https?:\/\/t\.co\//i.test(href)) return raw;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.endsWith('…') || trimmed.endsWith('...')) return raw;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  if (/^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/[^\s]*)?$/i.test(trimmed)) return `https://${trimmed}`;
+  return raw;
+}
+
 function readText(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? '';
   if (!(node instanceof Element)) return '';
   if (node.tagName === 'BUTTON') return '';
   if (node.tagName === 'BR') return '\n';
   if (node.tagName === 'IMG') return node.getAttribute('alt') ?? '';
+  if (node.tagName === 'A') return unwrapAnchorText(node);
   return Array.from(node.childNodes, readText).join('');
 }
 
@@ -54,14 +70,104 @@ export function getTweetData(tweet: Element): { text: string; url: string } {
   return { text, url: '' };
 }
 
-export function installXCopyMenu(): () => void {
-  const chinese = document.documentElement.lang.toLowerCase().startsWith('zh');
-  const labels = chinese ? {
-    image: '复制推文为截图', link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接', copied: '已复制',
-    failed: '复制失败，请重试', empty: '这条推文没有可复制的文字', missing: '无法获取推文链接',
-  } : {
-    image: 'Copy post as image', link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link', copied: 'Copied!',
-    failed: 'Copy failed. Please try again.', empty: 'This post has no text to copy.', missing: 'Post link unavailable.',
+function authorFromUrl(url: string): string | undefined {
+  try {
+    const match = new URL(url).pathname.match(/^\/([\w]+)\/status\/\d+/);
+    return match && match[1] !== 'i' ? match[1] : undefined;
+  } catch { return undefined; }
+}
+
+export function formatTweetCopy(data: { text: string; url: string }, format: XCopyFormat = 'default'): string {
+  const { text, url } = data;
+  if (format === 'plain') return [text, url].filter(Boolean).join('\n');
+  if (format === 'markdown') {
+    const author = authorFromUrl(url);
+    const quote = text ? text.split('\n').map(line => (line ? `> ${line}` : '>')).join('\n') : '';
+    const attribution = url ? `— ${author ? `@${author} ` : ''}[X](${url})` : '';
+    return [quote, attribution].filter(Boolean).join('\n\n');
+  }
+  return [text, url, '#X'].filter(Boolean).join('\n');
+}
+
+/** Collect consecutive posts by the same author on a status detail page. */
+export function collectThreadPosts(tweet: HTMLElement): HTMLElement[] {
+  const doc = tweet.ownerDocument;
+  if (!/^\/(?:\w+|i\/web)\/status\/\d+(?:\/|$)/.test(doc.location.pathname)) return [];
+  const baseAuthor = authorFromUrl(getTweetData(tweet).url)?.toLowerCase();
+  if (!baseAuthor) return [];
+  const scope = tweet.closest(PRIMARY) ?? doc;
+  const all = Array.from(scope.querySelectorAll<HTMLElement>(TWEET));
+  const index = all.indexOf(tweet);
+  if (index < 0) return [];
+  const matchesAuthor = (el: HTMLElement) => authorFromUrl(getTweetData(el).url)?.toLowerCase() === baseAuthor;
+  let start = index;
+  while (start > 0 && matchesAuthor(all[start - 1])) start--;
+  let end = index;
+  while (end < all.length - 1 && matchesAuthor(all[end + 1])) end++;
+  return end > start ? all.slice(start, end + 1) : [];
+}
+
+/** Format a multi-post author thread as Markdown, including original image links. */
+export function formatThreadMarkdown(posts: HTMLElement[]): string {
+  const parts: string[] = [];
+  let rootUrl = '';
+  let author: string | undefined;
+  for (const post of posts) {
+    const { text, url } = getTweetData(post);
+    if (!rootUrl && url) { rootUrl = url; author = authorFromUrl(url); }
+    const images = Array.from(post.querySelectorAll<HTMLImageElement>(PHOTO_IMAGE))
+      .filter(img => belongsToTweet(img, post))
+      .map(img => {
+        try {
+          const u = new URL(img.currentSrc || img.src);
+          u.searchParams.set('name', 'orig');
+          return `![${(img.alt || 'image').replace(/[\[\]]/g, '')}](${u.href})`;
+        } catch { return ''; }
+      })
+      .filter(Boolean);
+    const block = [text, ...images].filter(Boolean).join('\n\n');
+    if (block) parts.push(block);
+  }
+  const header = author && rootUrl ? `# @${author} Thread\n\n${rootUrl}\n\n---\n\n` : rootUrl ? `${rootUrl}\n\n---\n\n` : '';
+  return header + parts.join('\n\n---\n\n');
+}
+
+function screenshotFilename(url: string): string {
+  const match = url.match(/\/([\w]+)\/status\/(\d+)/);
+  return match ? `${match[1]}_${match[2]}.png` : 'x-post.png';
+}
+
+/** Expand a truncated long post before reading its text, if a Show more link is present. */
+async function expandShowMore(tweet: HTMLElement): Promise<boolean> {
+  const button = Array.from(tweet.querySelectorAll<HTMLElement>('[data-testid="tweet-text-show-more-link"]'))
+    .find(el => belongsToTweet(el, tweet));
+  if (!button || !button.isConnected) return false;
+  const before = getTweetData(tweet).text.length;
+  button.click();
+  await new Promise<void>(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; observer.disconnect(); clearTimeout(timer); resolve(); } };
+    const observer = new MutationObserver(() => {
+      if (!button.isConnected || getTweetData(tweet).text.length > before) finish();
+    });
+    observer.observe(tweet, { childList: true, subtree: true, characterData: true });
+    const timer = setTimeout(finish, 400);
+  });
+  return true;
+}
+
+export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } = {}): () => void {
+  const getLabels = () => {
+    const chinese = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
+    return chinese ? {
+      image: '复制推文为截图', link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接',
+      thread: '复制串推 (Markdown)', copied: '已复制',
+      failed: '复制失败，请重试', empty: '这条推文没有可复制的文字', missing: '无法获取推文链接',
+    } : {
+      image: 'Copy post as image', link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link',
+      thread: 'Copy thread (Markdown)', copied: 'Copied!',
+      failed: 'Copy failed. Please try again.', empty: 'This post has no text to copy.', missing: 'Post link unavailable.',
+    };
   };
   const toast = createToast();
   const style = document.createElement('style');
@@ -82,6 +188,7 @@ export function installXCopyMenu(): () => void {
     trigger: HTMLElement;
     tweet: HTMLElement;
     data: ReturnType<typeof getTweetData>;
+    thread: HTMLElement[];
     existing: Set<Element>;
     menu?: HTMLElement;
     heights: Element[];
@@ -111,29 +218,29 @@ export function installXCopyMenu(): () => void {
     reset();
   }
 
-  // Rendering takes hundreds of milliseconds, so start once the menu is shown and
-  // reuse the result when the screenshot item is chosen.
-  function prepareShot(current: Session): Promise<Blob> {
+  // Rendering is triggered on pointerenter/focus of the screenshot item (and cached fonts
+  // make captures fast without wasting CPU when opening the menu for unrelated actions).
+  function prepareShot(current: Session, opts?: ScreenshotOptions): Promise<Blob> {
     const posts = screenshotPosts(current.tweet, node => getTweetData(node).url);
-    const shot = current.shot;
+    const shot = !opts?.hideMetrics ? current.shot : undefined;
     if (shot && shot.posts.length === posts.length && shot.posts.every((post, index) => post === posts[index])) {
       // Retry once with the current DOM if the speculative render failed.
-      return shot.png.catch(() => renderPostScreenshot(posts));
+      return shot.png.catch(() => renderPostScreenshot(posts, opts));
     }
-    const png = renderPostScreenshot(posts);
+    const png = renderPostScreenshot(posts, opts);
     png.catch(() => {});
-    current.shot = { posts, png };
+    if (!opts?.hideMetrics) current.shot = { posts, png };
     return png;
   }
 
-  function prerender(current: Session) {
-    // Let the menu paint before cloning blocks the main thread.
-    requestAnimationFrame(() => setTimeout(() => {
-      if (session === current && !current.shot && !disposed && current.tweet.isConnected) prepareShot(current);
-    }, 0));
+  function prerenderOnIntent(current: Session) {
+    if (session === current && !current.shot && !disposed && current.tweet.isConnected) {
+      prepareShot(current);
+    }
   }
 
-  function createItem(kind: 'link' | 'text' | 'url' | 'image', current: Session) {
+  function createItem(kind: 'link' | 'text' | 'url' | 'image' | 'thread', current: Session) {
+    const labels = getLabels();
     const button = document.createElement('button');
     button.type = 'button';
     button.className = ITEM;
@@ -142,27 +249,61 @@ export function installXCopyMenu(): () => void {
     const label = document.createElement('span');
     label.textContent = labels[kind];
     button.appendChild(label);
+    if (kind === 'image') {
+      const warm = () => prerenderOnIntent(current);
+      button.addEventListener('pointerenter', warm, { once: true });
+      button.addEventListener('focus', warm, { once: true });
+    }
     button.addEventListener('click', async event => {
       event.preventDefault();
       event.stopPropagation();
+      const t = getLabels();
       if (kind === 'image') {
-        if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(labels.failed); return; }
+        if (!current.tweet.isConnected || getTweetData(current.tweet).url !== current.data.url) { toast.show(t.failed); return; }
+        const allPosts = screenshotPosts(current.tweet, node => getTweetData(node).url);
+        const hasParent = allPosts.length > 1;
         const png = prepareShot(current);
+        const tweetNode = current.tweet;
+        const filename = screenshotFilename(current.data.url);
         dismiss(current);
         closePreview?.();
-        closePreview = showScreenshotPreview(document, png, current.trigger);
+        closePreview = showScreenshotPreview(document, png, current.trigger, {
+          filename,
+          hasParent,
+          rerender: ({ hideMetrics, includeParent }) => {
+            const targetPosts = includeParent ? allPosts : [tweetNode];
+            return renderPostScreenshot(targetPosts, { hideMetrics });
+          },
+        });
         return;
       }
-      const { text, url } = current.data;
-      if (kind === 'text' && !text) { toast.show(labels.empty); return; }
-      if (kind !== 'text' && !url) { toast.show(labels.missing); return; }
-      const value = kind === 'text' ? text : kind === 'url' ? url : [text, url, '#X'].filter(Boolean).join('\n');
+      if (kind === 'thread') {
+        const md = formatThreadMarkdown(current.thread);
+        if (!md) { toast.show(t.empty); return; }
+        const result = copyToClipboard(md);
+        dismiss(current);
+        current.trigger.focus({ preventScroll: true });
+        const success = await result;
+        if (!disposed) toast.show(success ? t.copied : t.failed);
+        return;
+      }
+      let { text, url } = current.data;
+      if ((kind === 'text' || kind === 'link') && current.tweet.isConnected) {
+        const expanded = await expandShowMore(current.tweet);
+        if (expanded) {
+          const fresh = getTweetData(current.tweet);
+          if (fresh.url === url || !url) text = fresh.text || text;
+        }
+      }
+      if (kind === 'text' && !text) { toast.show(t.empty); return; }
+      if (kind !== 'text' && !url) { toast.show(t.missing); return; }
+      const value = kind === 'text' ? text : kind === 'url' ? url : formatTweetCopy({ text, url }, options.getCopyFormat?.() ?? 'default');
       // Start the write within the user gesture before closing the native menu.
       const result = copyToClipboard(value);
       dismiss(current);
       current.trigger.focus({ preventScroll: true });
       const success = await result;
-      if (!disposed) toast.show(success ? labels.copied : labels.failed);
+      if (!disposed) toast.show(success ? t.copied : t.failed);
     });
     return button;
   }
@@ -194,20 +335,23 @@ export function installXCopyMenu(): () => void {
         current.heights.push(parent);
       }
     }
+    const expectedCount = current.thread.length >= 2 ? 5 : 4;
     const existingItems = Array.from(menu.querySelectorAll(`.${ITEM}`));
-    if (existingItems.length === 4 && existingItems.every(item => dropdown.contains(item))) return;
+    if (existingItems.length === expectedCount && existingItems.every(item => dropdown.contains(item))) return;
     // X can move native items into Dropdown after initially mounting the menu.
     existingItems.forEach(item => item.remove());
     const nativeItem = dropdown.querySelector<HTMLElement>('[role="menuitem"]');
     if (!nativeItem) return;
     const color = getComputedStyle(nativeItem.querySelector('span') ?? nativeItem).color;
-    const link = createItem('link', current);
-    const text = createItem('text', current);
-    const url = createItem('url', current);
-    const image = createItem('image', current);
-    link.style.color = text.style.color = url.style.color = image.style.color = color;
-    nativeItem.before(link, text, url, image);
-    if (!current.shot) prerender(current);
+    const items = [
+      createItem('link', current),
+      createItem('text', current),
+      createItem('url', current),
+      createItem('image', current),
+      ...(current.thread.length >= 2 ? [createItem('thread', current)] : []),
+    ];
+    for (const item of items) item.style.color = color;
+    nativeItem.before(...items);
   }
 
   const observer = new MutationObserver(syncMenu);
@@ -216,8 +360,9 @@ export function installXCopyMenu(): () => void {
     const tweet = trigger.closest(TWEET);
     if (!tweet) { reset(); return; }
     reset();
+    const tweetEl = tweet as HTMLElement;
     session = {
-      trigger, tweet: tweet as HTMLElement, data: getTweetData(tweet), heights: [],
+      trigger, tweet: tweetEl, data: getTweetData(tweetEl), thread: collectThreadPosts(tweetEl), heights: [],
       existing: new Set(document.querySelectorAll('[role="menu"]')),
     };
     // Observe only while opening/using a tweet menu, not while scrolling the feed.

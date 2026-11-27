@@ -1,10 +1,11 @@
 import { preserveWebStyles } from '../utils/x-dom';
 import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-ready';
 import { DETAIL_FRAME_CSS, DETAIL_FRAME_NAME, installXColumns } from '../utils/x-columns';
+import { installXDefaultFollowing } from '../utils/x-default-following';
 import { installXStyle, isXOverlayRoute } from '../utils/x-style';
 import { installXTheme } from '../utils/x-theme';
 import { holdPreloadedAutoplay } from '../utils/x-video-gate';
-import { xStyleSetting, xThemeSetting } from '../utils/x-settings';
+import { xDefaultFollowingSetting, xStyleSetting, xThemeSetting } from '../utils/x-settings';
 
 export default defineContentScript({
   matches: ['*://*.x.com/*', '*://*.twitter.com/*'],
@@ -38,27 +39,38 @@ export default defineContentScript({
         if (ctx.isValid) void browser.runtime.sendMessage({ type: 'x-detail-release' }).catch(() => {});
       },
     });
+    const defaultFollowing = isDetail ? undefined : installXDefaultFollowing();
     const setStyle = (value: import('../utils/x-style').XStyle) => {
       xStyle.setStyle(value);
       columns?.setEnabled(value === 'columns');
+      columns?.setMediaEnhanced(value !== 'original');
     };
-    if (columns) columns.setEnabled(document.documentElement.getAttribute('data-site-enhancer-x') === 'columns');
+    const initialAttr = document.documentElement.getAttribute('data-site-enhancer-x');
+    if (columns) {
+      columns.setEnabled(initialAttr === 'columns');
+      columns.setMediaEnhanced(Boolean(initialAttr));
+    }
     const xTheme = installXTheme();
     void xStyleSetting.get().then(value => { if (ctx.isValid) setStyle(value); });
     void xThemeSetting.get().then(value => { if (ctx.isValid) xTheme.setTheme(value); });
+    void xDefaultFollowingSetting.get().then(value => { if (ctx.isValid) defaultFollowing?.setEnabled(value); });
     const stopStyleWatch = xStyleSetting.watch(setStyle);
     const stopThemeWatch = xThemeSetting.watch(xTheme.setTheme);
+    const stopFollowingWatch = xDefaultFollowingSetting.watch(value => defaultFollowing?.setEnabled(value));
     ctx.onInvalidated(() => {
       // Chrome has already removed listeners when the extension context is destroyed.
       if (!browser.runtime.id) return;
       stopStyleWatch();
       stopThemeWatch();
+      stopFollowingWatch();
     });
     ctx.addEventListener(window, 'wxt:locationchange', ({ newUrl }) => {
       // Keep the underlying page's styles while X shows a dialog route over it.
       if (!isXOverlayRoute(newUrl.pathname)) xStyle.setPage(newUrl.pathname);
       columns?.onNavigate();
+      defaultFollowing?.onNavigate(newUrl.pathname);
     });
+    ctx.onInvalidated(() => defaultFollowing?.remove());
     ctx.onInvalidated(() => columns?.remove());
     ctx.onInvalidated(xStyle.remove);
     ctx.onInvalidated(xTheme.remove);

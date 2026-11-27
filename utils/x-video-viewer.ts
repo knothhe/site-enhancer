@@ -1,6 +1,6 @@
 import { WEB, PLAYER } from './x-dom.ts';
 import { resolveLocale } from './i18n.ts';
-import { installXVideoPlayback } from './x-video-playback.ts';
+import { installXVideoPlayback, isGifVideo } from './x-video-playback.ts';
 
 const PRIMARY_TEST_ID = 'primaryColumn';
 const PLAYER_TEST_ID = 'videoPlayer';
@@ -9,13 +9,18 @@ const MEDIA = `${PLAYER},video`;
 const EXPANDED = 'data-site-enhancer-video-expanded';
 const FRAME = 'data-site-enhancer-video-frame';
 const BUTTON = 'data-site-enhancer-video-expand';
+const SPEED_BUTTON = 'data-site-enhancer-video-speed';
+const SPEEDS = [1, 1.25, 1.5, 2, 0.75] as const;
 const CSS = `
 ${PLAYER} video{object-fit:contain!important}
-[${BUTTON}]{position:absolute;right:10px;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
+[${BUTTON}],[${SPEED_BUTTON}]{position:absolute;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
+[${BUTTON}]{right:10px}
+[${SPEED_BUTTON}]{left:10px;font-variant-numeric:tabular-nums;font-weight:600;padding:4px 8px;min-height:28px;opacity:.82;transition:opacity .15s,background .15s}
+[${SPEED_BUTTON}]:hover,[${SPEED_BUTTON}]:focus-visible{opacity:1;background:#303640}
 [${BUTTON}][data-compact]{padding:6px}
 [${BUTTON}][data-compact] span{display:none}
 [${BUTTON}]:hover{background:#303640}
-[${BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}
+[${BUTTON}]:focus-visible,[${SPEED_BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}
 [${BUTTON}] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;pointer-events:none}
 ${PLAYER}[${EXPANDED}]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:58px 24px 24px!important;box-sizing:border-box!important;border:0!important;border-radius:0!important;background:#101318!important;color:#fff!important;overflow:hidden!important}
 ${PLAYER}[${EXPANDED}]::backdrop{background:#101318}
@@ -24,8 +29,9 @@ ${PLAYER}[${EXPANDED}]>div{height:100%!important;max-height:100%!important}
 ${PLAYER}[${EXPANDED}]>div>div[style*="padding-bottom"]{display:none!important}
 ${PLAYER}[${EXPANDED}] video{object-fit:contain!important}
 ${PLAYER}[${EXPANDED}] [${BUTTON}]{top:12px;right:24px;min-height:34px;padding:6px 10px}
+${PLAYER}[${EXPANDED}] [${SPEED_BUTTON}]{top:14px;left:24px;min-height:30px;opacity:1}
 ${PLAYER}[${EXPANDED}] [${BUTTON}][data-compact] span{display:inline}
-@media(max-width:600px){${PLAYER}[${EXPANDED}]{padding:58px 8px 8px!important}${PLAYER}[${EXPANDED}] [${BUTTON}]{right:12px}}
+@media(max-width:600px){${PLAYER}[${EXPANDED}]{padding:58px 8px 8px!important}${PLAYER}[${EXPANDED}] [${BUTTON}]{right:12px}${PLAYER}[${EXPANDED}] [${SPEED_BUTTON}]{left:12px}}
 `;
 
 /** Keep X's actual player (including its MediaSource, controls and event handlers)
@@ -38,8 +44,8 @@ export function installXVideoViewer(options: {
   let interruptedFeedVideo: HTMLVideoElement | undefined;
   let expanded: { player: HTMLElement; close: () => void } | undefined;
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
-    ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看' }
-    : { expand: 'Expand video', close: 'Close video · Esc', title: 'Video viewer' };
+    ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看', speed: '播放倍速' }
+    : { expand: 'Expand video', close: 'Close video · Esc', title: 'Video viewer', speed: 'Playback speed' };
 
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
@@ -130,7 +136,13 @@ export function installXVideoViewer(options: {
     style.id = 'site-enhancer-video-style';
     style.textContent = CSS;
     (doc.head ?? doc.documentElement).append(style);
-    const players = new Map<HTMLElement, { button: HTMLButtonElement; video: HTMLVideoElement }>();
+    const players = new Map<HTMLElement, { button: HTMLButtonElement; speed?: HTMLButtonElement; video: HTMLVideoElement }>();
+    function syncSpeedLabel(button: HTMLButtonElement, video: HTMLVideoElement) {
+      const rate = video.playbackRate || 1;
+      button.textContent = `${rate}x`;
+      button.title = `${labels().speed}: ${rate}x`;
+      button.setAttribute('aria-label', button.title);
+    }
     function syncPlayer(player: HTMLElement) {
       const existing = players.get(player);
       const video = player.isConnected && player.ownerDocument === doc && player.matches(POST_PLAYER)
@@ -140,6 +152,7 @@ export function installXVideoViewer(options: {
         if (expanded?.player === player) close();
         players.delete(player);
         existing?.button.remove();
+        existing?.speed?.remove();
         return;
       }
       if (existing) {
@@ -147,6 +160,13 @@ export function installXVideoViewer(options: {
         const width = player.getBoundingClientRect().width;
         existing.button.toggleAttribute('data-compact', width > 0 && width < 260);
         if (!player.contains(existing.button)) player.append(existing.button);
+        if (existing.speed) {
+          if (isGifVideo(video)) { existing.speed.remove(); existing.speed = undefined; }
+          else {
+            syncSpeedLabel(existing.speed, video);
+            if (!player.contains(existing.speed)) player.append(existing.speed);
+          }
+        }
         return;
       }
       if (typeof player.showPopover !== 'function') return;
@@ -161,8 +181,16 @@ export function installXVideoViewer(options: {
       button.querySelector('span')!.textContent = labels().expand;
       button.title = labels().expand;
       button.setAttribute('aria-label', labels().expand);
-      players.set(player, { button, video });
+      let speed: HTMLButtonElement | undefined;
+      if (!isGifVideo(video)) {
+        speed = doc.createElement('button');
+        speed.type = 'button';
+        speed.setAttribute(SPEED_BUTTON, '');
+        syncSpeedLabel(speed, video);
+      }
+      players.set(player, { button, speed, video });
       player.append(button);
+      if (speed) player.append(speed);
     }
     function syncChanges(records: MutationRecord[]) {
       if (expanded?.player.ownerDocument === doc && !expanded.player.isConnected) close();
@@ -193,7 +221,7 @@ export function installXVideoViewer(options: {
         for (const node of addedNodes) {
           if (node.nodeType !== 1) continue;
           const element = node as HTMLElement;
-          if (element.hasAttribute(BUTTON)) continue;
+          if (element.hasAttribute(BUTTON) || element.hasAttribute(SPEED_BUTTON)) continue;
           if (element.matches(MEDIA)) collectMedia(element);
           if (element.firstElementChild) element.querySelectorAll<HTMLElement>(MEDIA).forEach(collectMedia);
         }
@@ -208,6 +236,19 @@ export function installXVideoViewer(options: {
     }
     function click(event: MouseEvent) {
       const target = event.target as Element | null;
+      const speedBtn = target?.closest?.<HTMLButtonElement>(`[${SPEED_BUTTON}]`);
+      if (speedBtn && event.button === 0) {
+        const player = speedBtn.closest<HTMLElement>(PLAYER);
+        const entry = player && players.get(player);
+        if (entry && entry.speed === speedBtn) {
+          event.preventDefault(); event.stopImmediatePropagation();
+          const currentIdx = SPEEDS.indexOf(entry.video.playbackRate as typeof SPEEDS[number]);
+          const next = SPEEDS[(currentIdx + 1) % SPEEDS.length];
+          entry.video.playbackRate = next;
+          syncSpeedLabel(speedBtn, entry.video);
+        }
+        return;
+      }
       const button = target?.closest?.<HTMLButtonElement>(`[${BUTTON}]`);
       if (!button || event.button !== 0) return;
       const player = button.closest<HTMLElement>(PLAYER);
@@ -220,7 +261,7 @@ export function installXVideoViewer(options: {
       if (expanded?.player.ownerDocument === doc) close();
       observer.disconnect();
       doc.removeEventListener('click', click, true);
-      players.forEach(({ button }) => button.remove());
+      players.forEach(({ button, speed }) => { button.remove(); speed?.remove(); });
       style.remove();
     } });
     observer.observe(doc.documentElement, {
