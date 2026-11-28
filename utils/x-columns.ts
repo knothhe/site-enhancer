@@ -103,6 +103,8 @@ export function nativeVideoUrl(video: HTMLVideoElement, detailPost?: string) {
   return media.length > 1 && index >= 0 ? `${post.replace(/\/$/, '')}/video/${index + 1}` : post;
 }
 
+// Paint in the transparent bottom border so opaque post content cannot cover the rule.
+const insetLine = `border-bottom-color:transparent!important;background-image:linear-gradient(var(--se-column-line),var(--se-column-line))!important;background-size:calc(100% - 32px) 1px!important;background-position:center bottom!important;background-repeat:no-repeat!important;background-origin:border-box!important;background-clip:border-box!important`;
 export const DETAIL_FRAME_CSS = `
 ${WEB} body > div:has(> .flex > div.grid > main){max-width:none!important;padding:0!important;--x-main-column-width:100%!important}
 ${WEB} div:has(+ div.grid > main),${WEB} main + aside,${WEB} main :is([data-page-header],[data-top-chrome]),${WEB} [data-slot="xds-dock"]{display:none!important}
@@ -113,9 +115,10 @@ main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),
 [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
 [data-testid="primaryColumn"]>div>div:has([data-testid="app-bar-back"]):not(:has(section)){display:none!important}
-[data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{border-bottom-color:var(--se-x-border,rgba(127,127,127,.16))!important}
+[data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{${insetLine}}
 [data-testid="primaryColumn"],${WEB} div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:clamp(0px,round(nearest,calc(var(--se-detail-gutter,0) * 100%),1px),round(down,calc((100% - 360px) / 2),1px))!important}
-html{scrollbar-width:thin;scrollbar-color:#8885 transparent}
+html{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:transparent transparent}
+html:hover{scrollbar-color:#8885 transparent}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
 
@@ -136,11 +139,13 @@ ${W}:has(#site-enhancer-columns [data-state="empty"]) main + aside{display:flex!
 ${W}:has(main + aside) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
 ${W}:has(main + aside) #site-enhancer-columns [data-state="empty"]{display:none}
 ${W} body > [data-base-ui-portal]{position:relative;z-index:6}
-${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:#8885 transparent}
-${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:var(--se-column-line)!important}
+${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:none}
+${SCOPE}::-webkit-scrollbar{display:none}
+${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:transparent!important}
+${SCOPE}[data-site-enhancer-feed-scrolled] [data-site-enhancer-column-header]{${insetLine}}
 ${SCOPE} [data-testid="primaryColumn"],${row} > div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:var(--se-feed-gutter,0px)!important}
 ${SCOPE} [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
-${SCOPE} [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{border-bottom-color:var(--se-column-line)!important}
+${SCOPE} [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{${insetLine}}
 ${SCOPE} header[role="banner"]{width:var(--se-nav)!important;flex:0 0 var(--se-nav)!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_NewTweet_Button"]{width:calc(var(--se-nav) - 24px)!important;min-width:0!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]{max-width:var(--se-nav)!important;min-width:0!important}
@@ -164,7 +169,8 @@ ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns [data-state="
 ${SCOPE} #react-root>div:has(>div>#layers :is(${X_OVERLAY_SELECTOR})){z-index:6!important}
 /* The bottom-right drawers sit under the detail panel and would only flash over it while the app root is lifted. */
 ${SCOPE} #layers :is([data-testid="GrokDrawer"],[data-testid="chat-drawer-root"],[data-testid="DMDrawer"]){display:none!important}
-${SCOPE} [data-site-enhancer-selected]{box-shadow:inset 2px 0 color-mix(in srgb,var(--se-x-accent,#1d9bf0) 55%,transparent);background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 4%,transparent)!important}
+${SCOPE}:has(#site-enhancer-columns[data-dark]){--se-selection-tint:8%}
+${SCOPE} [data-site-enhancer-selected]{border-radius:12px!important;background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) var(--se-selection-tint,5%),transparent)!important}
 /* Compact navigation keeps every glyph on the same 24px / 48px grid. */
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"]>div>div>div{padding-left:0!important;padding-right:0!important;align-items:center!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] nav{width:100%!important;align-items:center!important;gap:4px!important}
@@ -180,16 +186,18 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:first-child{width:24px!important;height:24px!important;min-width:24px!important;flex-basis:24px!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"] :is(img,[data-testid^="UserAvatar-Container"]){width:24px!important;height:24px!important;min-width:24px!important}
 /* Sidebar toggle sits inside the nav rail: right-aligned above the account switcher when expanded, centered on the icon column when compact. */
-#site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 52px);bottom:84px;z-index:5;display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:var(--se-toggle-bg,var(--se-x-bg,#fff));color:var(--se-toggle-fg,var(--se-x-muted,#536471));cursor:pointer;transition:background-color .15s,color .15s}
-#site-enhancer-nav-toggle[hidden]{display:none}
-:root[data-site-enhancer-compact-nav] #site-enhancer-nav-toggle{left:calc(var(--se-nav) / 2 - 20px)}
-#site-enhancer-nav-toggle:hover{background:color-mix(in srgb,currentColor 10%,var(--se-toggle-bg,var(--se-x-bg,#fff)));color:var(--se-x-text,var(--se-toggle-hover,#0f1419))}
+${SCOPE} #site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 52px);bottom:84px;z-index:5;display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:var(--se-toggle-bg,var(--se-x-bg,#fff));color:var(--se-toggle-fg,var(--se-x-muted,#536471));cursor:pointer;opacity:0;transition:opacity .15s,background-color .15s,color .15s}
+${SCOPE}:has(header[role="banner"]:hover) #site-enhancer-nav-toggle,${W}:has(body > div > .flex > div:first-child:hover + .grid > main) #site-enhancer-nav-toggle,${SCOPE} #site-enhancer-nav-toggle:is(:hover,:focus-visible){opacity:1}
+${SCOPE} #site-enhancer-nav-toggle[hidden]{display:none}
+${SCOPE}[data-site-enhancer-compact-nav] #site-enhancer-nav-toggle{left:calc(var(--se-nav) / 2 - 20px)}
+${SCOPE} #site-enhancer-nav-toggle:hover{background:color-mix(in srgb,currentColor 10%,var(--se-toggle-bg,var(--se-x-bg,#fff)));color:var(--se-x-text,var(--se-toggle-hover,#0f1419))}
 #site-enhancer-nav-toggle svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 #site-enhancer-nav-toggle:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 .se-column-divider[hidden]{display:none}
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
 #site-enhancer-columns *{box-sizing:border-box}
-#site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid var(--se-column-line)}
+${SCOPE} #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid transparent}
+${SCOPE} #site-enhancer-columns[data-detail-scrolled] .se-column-toolbar{${insetLine}}
 #site-enhancer-columns .se-column-toolbar .se-column-title{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #site-enhancer-columns button,#site-enhancer-columns a{font:inherit;color:inherit;background:transparent;border:0;text-decoration:none;cursor:pointer;border-radius:9px}
 #site-enhancer-columns .se-column-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:7px;color:var(--se-x-muted,var(--se-native-muted,#65717b));transition:background .15s,color .15s}
@@ -218,7 +226,7 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns .se-width-menu .se-segments button[aria-checked="true"]{background:var(--se-x-bg,#fff);color:inherit;font-weight:600;box-shadow:0 1px 2px #0003}
 #site-enhancer-columns[data-dark] .se-width-menu .se-segments button[aria-checked="true"]{background:color-mix(in srgb,currentColor 18%,transparent);box-shadow:none}
 #site-enhancer-columns .se-width-reset{color:var(--se-menu-muted)}
-#site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
+#site-enhancer-columns :focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
 #site-enhancer-columns [hidden]{display:none!important}
@@ -235,12 +243,13 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns[data-switching] .se-column-toolbar::after{content:"";position:absolute;top:var(--se-column-header-height,54px);left:0;width:30%;height:2px;background:var(--se-x-accent,#1d9bf0);animation:se-progress 1s ease-in-out infinite alternate;z-index:1}
 @keyframes se-progress{to{transform:translateX(230%)}}
 @keyframes se-column-spin{to{transform:rotate(360deg)}}
-.se-column-divider{position:fixed;top:0;bottom:0;width:10px;margin-left:-5px;z-index:4;cursor:col-resize;touch-action:none;background:transparent;border:0;padding:0}
-.se-column-divider::before{content:"";position:absolute;top:0;bottom:0;left:5px;width:1px;background:var(--se-column-line);transition:background .15s}
-.se-column-divider::after{content:"";position:absolute;top:45%;left:4px;width:3px;height:32px;border-radius:3px;background:var(--se-x-accent,#73818d);opacity:0;transition:opacity .15s}
-.se-column-divider:hover::after,.se-column-divider:focus-visible::after,${SCOPE}[data-site-enhancer-resizing] .se-column-divider::after{opacity:.7}
-.se-column-divider:hover::before,.se-column-divider:focus-visible::before{background:color-mix(in srgb,var(--se-x-accent,#73818d) 40%,transparent)}
-@media(prefers-reduced-motion:reduce){#site-enhancer-columns *, .se-column-divider::before,.se-column-divider::after{animation:none!important;transition:none!important}}
+${SCOPE} .se-column-divider{position:fixed;top:0;bottom:0;width:12px;margin-left:-6px;z-index:4;cursor:col-resize;touch-action:none;background:transparent;border:0;padding:0;outline:none}
+${SCOPE} .se-column-divider::after{content:"";position:absolute;left:4px;top:clamp(var(--se-column-header-height,54px),calc(var(--se-grip-y,50%) - 20px),calc(100% - 40px));width:4px;height:40px;border-radius:4px;background:var(--se-x-muted,#73818d);opacity:0;transition:opacity .12s}
+${SCOPE} .se-column-divider:hover::after{opacity:.75;transition-delay:120ms}
+${SCOPE} .se-column-divider:focus-visible::after{top:calc(50% - 20px);opacity:1;outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
+${SCOPE}[data-site-enhancer-resizing] .se-column-divider[data-dragging]::after{opacity:1;background:var(--se-x-accent,#1d9bf0);transition:none}
+${SCOPE}[data-site-enhancer-resizing] .se-column-divider[data-dragging]::before{content:"";position:absolute;inset:0 auto 0 50%;width:1px;background:var(--se-x-accent,#1d9bf0);opacity:.5}
+@media(prefers-reduced-motion:reduce){#site-enhancer-columns *,${SCOPE} #site-enhancer-nav-toggle,${SCOPE} .se-column-divider::after{animation:none!important;transition:none!important}}
 ${SCOPE}[data-site-enhancer-resizing] iframe{pointer-events:none!important}
 ${SCOPE}[data-site-enhancer-resizing],${SCOPE}[data-site-enhancer-resizing] *{cursor:col-resize!important;user-select:none!important}
 `;
@@ -360,6 +369,13 @@ export function installXColumns(options: {
   let unmeasuredHeaderElements: Element[] = [];
   let backButton: HTMLButtonElement;
   let forwardButton: HTMLButtonElement;
+  let closeButton: HTMLButtonElement;
+  function syncToolbar() {
+    backButton.disabled = !history.canBack();
+    forwardButton.disabled = !history.canForward();
+    backButton.hidden = forwardButton.hidden = !selected || (backButton.disabled && forwardButton.disabled);
+    copyLinkButton.hidden = openLink.hidden = closeButton.hidden = !selected;
+  }
   const history = installDetailHistory(url => {
     if (!panel) return;
     if (url) {
@@ -368,9 +384,7 @@ export function installXColumns(options: {
     }
     else closeDetail(false);
   }, () => {
-    if (!panel) return;
-    backButton.disabled = !history.canBack();
-    forwardButton.disabled = !history.canForward();
+    if (panel) syncToolbar();
   }, () => !!panel && active());
   try { widths = parseColumnWidths(JSON.parse(localStorage.getItem(COLUMNS_WIDTH_KEY) ?? 'null')); } catch { /* Optional preference. */ }
 
@@ -395,6 +409,7 @@ export function installXColumns(options: {
     decoration.append(icon(state));
     status.append(decoration, heading, body, retry);
     status.hidden = false;
+    panel?.removeAttribute('data-detail-scrolled');
   }
   function stopFrameWatch() {
     clearInterval(timer);
@@ -407,6 +422,7 @@ export function installXColumns(options: {
       doc.removeEventListener('click', click, true);
       doc.removeEventListener('keydown', openFocused, true);
       doc.removeEventListener('keydown', closeOnEscape);
+      doc.defaultView?.removeEventListener('scroll', syncDetailScroll);
       media.detach(doc);
     }
     frameDocuments.delete(target);
@@ -454,11 +470,8 @@ export function installXColumns(options: {
     selectedArticle = undefined;
     selectedOffset = undefined;
     locatePending = false;
-    openLink.hidden = true;
-    copyLinkButton.hidden = true;
     retry.hidden = true;
-    backButton.disabled = !history.canBack();
-    forwardButton.disabled = !history.canForward();
+    syncToolbar();
     updateTitle();
     showStatus('empty', 'emptyHint');
     if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
@@ -478,7 +491,17 @@ export function installXColumns(options: {
   }
   let hoverArticle: Element | undefined;
   let lastScroll = -Infinity;
-  function scrolling() {
+  let feedScrollFrame: number | undefined;
+  function syncFeedScroll() {
+    feedScrollFrame = undefined;
+    root.toggleAttribute('data-site-enhancer-feed-scrolled', window.scrollY > 0);
+  }
+  function syncDetailScroll() {
+    const view = frame && frameDocuments.get(frame)?.defaultView;
+    panel?.toggleAttribute('data-detail-scrolled', !!view && status.hidden && view.scrollY > 0);
+  }
+  function scrolling(event: Event) {
+    if (event.type === 'scroll' && feedScrollFrame === undefined) feedScrollFrame = window.requestAnimationFrame(syncFeedScroll);
     lastScroll = Date.now();
     cancelHover();
   }
@@ -562,8 +585,7 @@ export function installXColumns(options: {
     updateTitle();
     media.setFeedPaused(true);
     openLink.href = url;
-    openLink.hidden = false;
-    copyLinkButton.hidden = false;
+    syncToolbar();
     retry.hidden = true;
     const cached = readyFrames.get(url);
     if (cached && reusable(url, cached)) {
@@ -573,6 +595,7 @@ export function installXColumns(options: {
       frame = cached.frame; frame.hidden = false; frame.title = t.frameTitle;
       status.hidden = true;
       cached.doc.defaultView?.scrollTo(cached.scrollX, cached.scrollY);
+      syncDetailScroll();
       return;
     }
     if (cached) discardFrame(cached.frame);
@@ -626,6 +649,7 @@ export function installXColumns(options: {
               title.textContent = primary.querySelector('[data-testid="User-Name"]')?.textContent || t.title;
             }
             frameDocuments.set(current, doc);
+            doc.defaultView?.addEventListener('scroll', syncDetailScroll, { passive: true });
             media.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
             while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
@@ -633,6 +657,7 @@ export function installXColumns(options: {
             current.style.visibility = '';
             current.removeAttribute(DETAIL_PENDING_ATTR);
             status.hidden = true;
+            syncDetailScroll();
             retry.hidden = true;
             stopFrameWatch();
             return;
@@ -893,10 +918,9 @@ export function installXColumns(options: {
     retry = button('retry', () => { if (selected) openDetail(selected); });
     backButton = button('back', () => history.back(), 'back');
     forwardButton = button('forward', () => history.forward(), 'forward');
-    backButton.disabled = !history.canBack();
-    forwardButton.disabled = !history.canForward();
     widthControl = createWidthControl();
-    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, widthControl.trigger, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    closeButton = button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close');
+    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, widthControl.trigger, closeButton);
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -946,11 +970,16 @@ export function installXColumns(options: {
         divider.setAttribute('aria-label', kind === 0 ? t.resizeNav : t.resizeDetail);
         divider.title = t.resizeHint;
       });
+      const positionGrip = (event: PointerEvent) => divider.style.setProperty('--se-grip-y', `${event.clientY}px`);
+      divider.addEventListener('pointerenter', positionGrip);
+      divider.addEventListener('pointermove', positionGrip);
       divider.addEventListener('dblclick', reset);
       divider.addEventListener('pointerdown', event => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || drag) return;
         event.preventDefault();
         drag = { kind, x: event.clientX, widths: { ...widths } };
+        positionGrip(event);
+        divider.setAttribute('data-dragging', '');
         divider.setPointerCapture(event.pointerId);
         root.setAttribute('data-site-enhancer-resizing', '');
       });
@@ -964,6 +993,9 @@ export function installXColumns(options: {
       document.body.append(divider);
       return divider;
     });
+    window.addEventListener('scroll', scrolling, { capture: true, passive: true });
+    window.addEventListener('wheel', scrolling, { capture: true, passive: true });
+    syncFeedScroll();
     if (!history.restore()) closeDetail(false);
   }
   /** X virtualizes timeline cells; mark the selected post again when its article is re-rendered. */
@@ -1095,13 +1127,19 @@ export function installXColumns(options: {
     if (!drag) return;
     if (event?.type === 'pointercancel') { widths = drag.widths; renderWidths(); }
     else save();
+    dividers[drag.kind].removeAttribute('data-dragging');
     drag = undefined;
     root.removeAttribute('data-site-enhancer-resizing');
   }
   function blur() { end(); }
   function unmount() {
+    window.removeEventListener('wheel', scrolling, true);
+    window.removeEventListener('scroll', scrolling, true);
     clearTimeout(structureTimer);
     structureTimer = undefined;
+    if (feedScrollFrame !== undefined) window.cancelAnimationFrame(feedScrollFrame);
+    feedScrollFrame = undefined;
+    root.removeAttribute('data-site-enhancer-feed-scrolled');
     hidePrevious();
     cancelHover();
     clearTimeout(followTimer);
@@ -1293,8 +1331,6 @@ export function installXColumns(options: {
   observeStructure();
   document.addEventListener('focusin', follow);
   document.addEventListener('pointermove', hover);
-  window.addEventListener('scroll', scrolling, { capture: true, passive: true });
-  window.addEventListener('wheel', scrolling, { capture: true, passive: true });
   document.addEventListener('pointerout', hover);
   document.addEventListener('click', click, true);
   window.addEventListener('keydown', openFocused, true);
@@ -1335,8 +1371,6 @@ export function installXColumns(options: {
       history.remove();
       document.removeEventListener('focusin', follow);
       document.removeEventListener('pointermove', hover);
-      window.removeEventListener('scroll', scrolling, true);
-      window.removeEventListener('wheel', scrolling, true);
       document.removeEventListener('pointerout', hover);
       document.removeEventListener('click', click, true);
       window.removeEventListener('keydown', openFocused, true);

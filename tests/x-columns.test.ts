@@ -5,7 +5,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { activeWidthPreset, adjustedFeedShare, columnGeometry, gutterPixels, DEFAULT_COLUMNS, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
+import { activeWidthPreset, adjustedFeedShare, columnGeometry, gutterPixels, DEFAULT_COLUMNS, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, DETAIL_FRAME_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
 
 import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
@@ -45,6 +45,97 @@ test('X layer overlays lift the app root above the fixed detail panel only while
   assert.match(COLUMNS_CSS, /#layers :is\(\[data-testid="GrokDrawer"\],\[data-testid="chat-drawer-root"\],\[data-testid="DMDrawer"\]\)\{display:none!important\}/);
   assert.doesNotThrow(() => new win.CSSStyleSheet().replaceSync(COLUMNS_CSS));
 });
+test('divider rules reserve the hairline for dragging and use a hidden grip at rest', () => {
+  const dividerRules = COLUMNS_CSS.split('\n').filter(line => line.includes('.se-column-divider') && line.includes('::before'));
+  assert.equal(dividerRules.length, 1);
+  assert.match(dividerRules[0], /\[data-site-enhancer-resizing\] \.se-column-divider\[data-dragging\]::before/);
+  assert.match(COLUMNS_CSS, /\.se-column-divider::after\{[^}]*opacity:0/);
+  start();
+  const divider = document.querySelector<HTMLElement>('.se-column-divider')!;
+  divider.dispatchEvent(new win.PointerEvent('pointermove', { clientY: 237 }) as unknown as Event);
+  assert.equal(divider.style.getPropertyValue('--se-grip-y'), '237px');
+});
+
+test('posts have inset separators in each pane and a rounded selection tint', () => {
+  for (const css of [COLUMNS_CSS, DETAIL_FRAME_CSS]) {
+    assert.match(css, /cellInnerDiv[^{}]+>div\{border-bottom-color:transparent[^}]+calc\(100% - 32px\) 1px/);
+  }
+  const selected = COLUMNS_CSS.split('\n').find(line => line.includes('[data-site-enhancer-selected]'))!;
+  assert.match(selected, /border-radius:12px/);
+  assert.match(selected, /background-color:color-mix/);
+  assert.doesNotMatch(selected, /box-shadow/);
+});
+
+test('empty toolbar shows title and layout, with history buttons shown together after selection', () => {
+  start();
+  const toolbar = document.querySelector('.se-column-toolbar')!;
+  const visible = () => Array.from(toolbar.children).filter(el => !(el as HTMLElement).hidden);
+  const titleAndLayout = [toolbar.querySelector('.se-column-title'), toolbar.querySelector('[aria-haspopup="dialog"]')];
+  assert.deepEqual(visible(), titleAndLayout);
+  const back = toolbar.querySelector<HTMLButtonElement>('[aria-label="后退"]')!;
+  const forward = toolbar.querySelector<HTMLButtonElement>('[aria-label="前进"]')!;
+  assert.ok(back.disabled && forward.disabled);
+  selectDetail(123);
+  assert.equal(visible().length, 7);
+  assert.equal(back.disabled, false);
+  assert.equal(forward.disabled, true);
+  click('.se-column-toolbar [aria-label="关闭"]');
+  assert.deepEqual(visible(), titleAndLayout);
+});
+
+test('feed scroll state follows the viewport and pending updates are cancelled on unmount', async t => {
+  const remove = t.mock.method(win, 'removeEventListener');
+  win.scrollTo(0, 80);
+  const instance = start();
+  const scrolled = () => document.documentElement.hasAttribute('data-site-enhancer-feed-scrolled');
+  assert.equal(scrolled(), true);
+  const paint = () => new Promise<void>(resolve => win.requestAnimationFrame(() => resolve()));
+  win.scrollTo(0, 0);
+  win.dispatchEvent(new win.Event('scroll'));
+  assert.equal(scrolled(), true);
+  await paint();
+  assert.equal(scrolled(), false);
+  win.scrollTo(0, 100);
+  win.dispatchEvent(new win.Event('scroll'));
+  await paint();
+  assert.equal(scrolled(), true);
+  win.dispatchEvent(new win.Event('scroll'));
+  instance.setEnabled(false);
+  assert.ok(remove.mock.calls.some(call => call.arguments[0] === 'scroll'));
+  win.dispatchEvent(new win.Event('scroll'));
+  await paint();
+  assert.equal(scrolled(), false);
+});
+
+test('toolbar follows the visible detail scroll on switch and restore, releasing evicted and unmounted listeners', t => {
+  const instance = start();
+  const panel = document.querySelector('#site-enhancer-columns')!;
+  const scrolled = () => panel.hasAttribute('data-detail-scrolled');
+  const first = selectDetail(123);
+  const firstView = attachReadyDetail(t, first, first.src);
+  const removeFirst = t.mock.method(firstView, 'removeEventListener');
+  signalDetail(firstView);
+  firstView.scrollTo(0, 100);
+  firstView.dispatchEvent(new firstView.Event('scroll'));
+  assert.equal(scrolled(), true);
+  const second = selectDetail(456);
+  assert.equal(scrolled(), false, 'loading');
+  const secondView = attachReadyDetail(t, second, second.src);
+  const removeSecond = t.mock.method(secondView, 'removeEventListener');
+  signalDetail(secondView);
+  firstView.dispatchEvent(new firstView.Event('scroll'));
+  assert.equal(scrolled(), false, 'parked frame');
+  assert.equal(selectDetail(123), first);
+  assert.equal(scrolled(), true, 'restored position');
+  firstView.scrollTo(0, 0);
+  firstView.dispatchEvent(new firstView.Event('scroll'));
+  assert.equal(scrolled(), false);
+  selectDetail(789);
+  assert.ok(removeSecond.mock.calls.some(call => call.arguments[0] === 'scroll'), 'discard');
+  instance.setEnabled(false);
+  assert.ok(removeFirst.mock.calls.some(call => call.arguments[0] === 'scroll'), 'unmount');
+});
+
 test('width preferences reject invalid values and preserve valid explicit values', () => {
   for (const value of [null, {}, { nav: 0, share: .5 }, { nav: 200, share: Infinity }, { nav: 200, share: .01 }]) {
     assert.deepEqual(parseColumnWidths(value), DEFAULT_COLUMNS);
