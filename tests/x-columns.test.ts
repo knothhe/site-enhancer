@@ -5,7 +5,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
+import { activeWidthPreset, adjustedFeedShare, columnGeometry, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
 
 import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
@@ -47,8 +47,9 @@ test('X layer overlays lift the app root above the fixed detail panel only while
 });
 test('width preferences reject invalid values and preserve valid explicit values', () => {
   for (const value of [null, {}, { nav: 0, share: .5 }, { nav: 200, share: Infinity }, { nav: 200, share: .01 }]) {
-    assert.deepEqual(parseColumnWidths(value), { nav: 200, share: .52 });
+    assert.deepEqual(parseColumnWidths(value), { nav: 200, share: .5 });
   }
+  assert.deepEqual(parseColumnWidths({ nav: 200, share: .52 }), { nav: 200, share: .52 });
   assert.deepEqual(parseColumnWidths({ nav: 88, share: .4 }), { nav: 88, share: .4 });
 });
 test('every supported viewport preserves minimum reading widths and fills available space', () => {
@@ -56,12 +57,60 @@ test('every supported viewport preserves minimum reading widths and fills availa
     for (const nav of [88, 200, 280]) for (const share of [.25, .52, .75]) {
       const geometry = columnGeometry(width, { nav, share });
       assert.ok(geometry.feed >= 360);
-      assert.ok(geometry.feed <= 680);
       assert.ok(geometry.detail >= 360);
       assert.equal(geometry.nav + geometry.feed + geometry.detail, width);
     }
   }
 });
+test('presets split the full width remaining after navigation, subject to the reading minimums', () => {
+  for (const [width, expected] of [[1280, [432, 540, 648]], [1680, [592, 740, 888]], [2560, [944, 1180, 1416]]] as const) {
+    assert.deepEqual([.4, .5, .6].map(share => columnGeometry(width, { nav: 200, share }).feed), expected);
+  }
+  assert.deepEqual(columnGeometry(1080, { nav: 280, share: .25 }), { nav: 280, feed: 360, detail: 440 });
+  assert.deepEqual(columnGeometry(1080, { nav: 280, share: .75 }), { nav: 280, feed: 440, detail: 360 });
+});
+
+test('drag snaps within 12px of rendered presets, keyboard movement stays continuous', () => {
+  for (const share of [.4, .5, .6]) {
+    const feed = 1480 * share;
+    for (const offset of [-12, 12]) assert.equal(adjustedFeedShare(1480, feed + offset, true), share);
+    for (const offset of [-13, 13]) assert.equal(adjustedFeedShare(1480, feed + offset, true), (feed + offset) / 1480);
+    assert.equal(adjustedFeedShare(1480, feed + 10, false), (feed + 10) / 1480);
+    assert.equal(activeWidthPreset(share + .0049)?.share, share);
+    assert.equal(activeWidthPreset(share - .0051), undefined);
+  }
+  assert.equal(adjustedFeedShare(800, 360, true), .4);
+});
+
+test('preset menu preserves navigation, syncs stored selections, and consumes its own Escape', () => {
+  localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify({ nav: 240, share: .52 }));
+  start();
+  click('time');
+  const selector = '.se-column-icon[aria-haspopup="menu"]';
+  const trigger = document.querySelector<HTMLButtonElement>(selector)!;
+  key(trigger, { key: 'ArrowDown' });
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+  assert.equal(document.activeElement, rows[0]);
+  assert.ok(rows.every(row => row.getAttribute('aria-checked') === 'false'));
+  key(rows[0], { key: 'ArrowUp' });
+  assert.equal(document.activeElement?.getAttribute('role'), 'menuitem');
+  key(document.activeElement, { key: 'ArrowUp' });
+  key(document.activeElement, { key: 'Enter' });
+  assert.deepEqual(JSON.parse(localStorage.getItem(COLUMNS_WIDTH_KEY)!), { nav: 240, share: .6 });
+  assert.equal(document.activeElement, trigger);
+  click(selector);
+  assert.equal(document.activeElement, rows[2]);
+  win.dispatchEvent(new win.StorageEvent('storage', { key: COLUMNS_WIDTH_KEY, newValue: '{"nav":240,"share":0.5}' }));
+  assert.equal(rows[1].getAttribute('aria-checked'), 'true');
+  key(rows[2], { key: 'Escape' });
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+  assert.equal(document.activeElement, trigger);
+  assert.ok(document.querySelector('iframe'));
+  click(selector);
+  click('[data-testid="tweetText"]');
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+});
+
 test('only same-origin complete post routes are eligible for embedded details', () => {
   assert.equal(detailUrl('/alice/status/123?s=20', 'https://x.com'), 'https://x.com/alice/status/123');
   assert.equal(detailUrl('/i/web/status/123', 'https://x.com'), 'https://x.com/i/web/status/123');

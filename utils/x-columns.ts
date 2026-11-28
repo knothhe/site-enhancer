@@ -14,7 +14,7 @@ export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
 export const COLUMNS_COLLAPSED_KEY = 'site-enhancer:x-nav-collapsed';
 export const DETAIL_FRAME_NAME = 'site-enhancer-x-detail';
 export type ColumnWidths = { nav: number; share: number };
-export const DEFAULT_COLUMNS: ColumnWidths = { nav: 200, share: .52 };
+export const DEFAULT_COLUMNS: ColumnWidths = { nav: 200, share: .5 };
 
 export function parseColumnWidths(value: unknown): ColumnWidths {
   if (typeof value !== 'object' || value === null) return { ...DEFAULT_COLUMNS };
@@ -22,14 +22,35 @@ export function parseColumnWidths(value: unknown): ColumnWidths {
   return Number.isFinite(nav) && nav >= 88 && nav <= 280 && Number.isFinite(share) && share >= .25 && share <= .75
     ? { nav, share } : { ...DEFAULT_COLUMNS };
 }
-const MAX_FEED = 680;
+const widthPresets = [
+  { label: 'detailFocus', share: .4, parts: [2, 3] },
+  { label: 'balanced', share: .5, parts: [1, 1] },
+  { label: 'timelineFocus', share: .6, parts: [3, 2] },
+] as const;
+
+function feedWidth(available: number, share: number) {
+  return Math.max(360, Math.min(available - 360, Math.round(available * share)));
+}
+
+export function activeWidthPreset(share: number) {
+  return widthPresets.find(preset => Math.abs(share - preset.share) < .005);
+}
+
+export function adjustedFeedShare(available: number, feed: number, snap: boolean) {
+  if (snap) {
+    const preset = widthPresets.find(preset => Math.abs(feedWidth(available, preset.share) - feed) <= 12);
+    if (preset) return preset.share;
+  }
+  const clamped = Math.max(360, Math.min(available - 360, feed));
+  return Math.max(.25, Math.min(.75, clamped / available));
+}
+
 /** How long a missing timeline column is treated as a route change rather than an unsupported page. */
 export const STRUCTURE_GRACE_MS = 1500;
-const shareBasis = (available: number) => Math.min(available, MAX_FEED / DEFAULT_COLUMNS.share);
 export function columnGeometry(width: number, preference: ColumnWidths) {
   const nav = Math.min(preference.nav, Math.max(88, width - 800));
   const available = width - nav;
-  const feed = Math.max(360, Math.min(MAX_FEED, available - 360, Math.round(shareBasis(available) * preference.share)));
+  const feed = feedWidth(available, preference.share);
   return { nav, feed, detail: available - feed };
 }
 /** The post's own timestamp link, skipping timestamps inside quoted-post cards. */
@@ -158,13 +179,29 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
 #site-enhancer-columns *{box-sizing:border-box}
 #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid var(--se-column-line)}
-#site-enhancer-columns .se-column-toolbar .se-column-title{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap}
+#site-enhancer-columns .se-column-toolbar .se-column-title{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #site-enhancer-columns button,#site-enhancer-columns a{font:inherit;color:inherit;background:transparent;border:0;text-decoration:none;cursor:pointer;border-radius:9px}
 #site-enhancer-columns .se-column-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:7px;color:var(--se-x-muted,var(--se-native-muted,#65717b));transition:background .15s,color .15s}
 #site-enhancer-columns button:disabled{cursor:default}
 #site-enhancer-columns button:disabled:not(.se-column-title){opacity:.28}
-#site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
+#site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover,#site-enhancer-columns .se-column-icon[aria-expanded="true"]{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
 #site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+#site-enhancer-columns .se-width-menu{position:absolute;z-index:2;top:calc(var(--se-column-header-height,54px) - 4px);width:232px;padding:6px;border:1px solid var(--se-column-line);border-radius:14px;background:var(--se-x-bg,var(--se-native-bg,#fff));box-shadow:0 8px 28px #0002,0 1px 3px #0001;--se-menu-muted:var(--se-x-muted,var(--se-native-muted,#65717b))}
+#site-enhancer-columns[data-dark] .se-width-menu{box-shadow:0 0 0 1px #ffffff14,0 8px 28px #000a}
+#site-enhancer-columns .se-width-header{font-size:12px;font-weight:600;color:var(--se-menu-muted);padding:6px 10px 4px}
+#site-enhancer-columns .se-width-menu button{display:flex;align-items:center;gap:10px;padding:8px 10px;width:100%;text-align:start}
+#site-enhancer-columns .se-width-menu button:not(:disabled):hover{background:color-mix(in srgb,currentColor 6%,transparent)}
+#site-enhancer-columns .se-width-diagram{width:40px;height:20px;display:flex;align-items:stretch;justify-content:center;gap:2px;flex:none}
+#site-enhancer-columns .se-width-diagram i{border:1.4px solid currentColor;border-radius:3px;opacity:.55}
+#site-enhancer-columns [aria-checked="true"] .se-width-diagram i{opacity:1;border-color:var(--se-x-accent,#1d9bf0)}
+#site-enhancer-columns [aria-checked="true"] .se-width-diagram i:first-child{background:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 22%,transparent)}
+#site-enhancer-columns .se-width-label{font-weight:500;flex:1}
+#site-enhancer-columns .se-width-ratio{font-size:13px;font-variant-numeric:tabular-nums;color:var(--se-menu-muted)}
+#site-enhancer-columns .se-width-check{width:16px;display:flex;color:var(--se-x-accent,#1d9bf0)}
+#site-enhancer-columns .se-width-check svg{width:16px;height:16px;stroke-width:2}
+#site-enhancer-columns [aria-checked="false"] .se-width-check svg{display:none}
+#site-enhancer-columns .se-width-line{height:1px;background:var(--se-column-line);margin:6px 4px}
+#site-enhancer-columns .se-width-menu [role="menuitem"]{color:var(--se-menu-muted)}
 #site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
@@ -200,8 +237,9 @@ const zh = {
   loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
   frameTitle: '推文详情和回复', panel: '推文详情', title: '推文详情',
   failed: '详情暂时无法加载', failedHint: '请重新加载扩展和页面后重试，或在新标签页查看。', retryHint: '可以重试，或在新标签页查看。',
-  newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复栏宽', close: '关闭',
-  resizeNav: '调整导航栏宽度', resizeDetail: '调整时间线和详情宽度', resizeHint: '拖动调整宽度；方向键微调；双击恢复默认',
+  newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复默认栏宽', close: '关闭',
+  widths: '栏宽', ratio: '时间线 : 详情', detailFocus: '详情优先', balanced: '均分', timelineFocus: '列表优先',
+  resizeNav: '调整导航栏宽度', resizeDetail: '调整时间线和详情宽度', resizeHint: '拖动调整宽度，靠近预设比例时吸附；方向键微调；双击恢复默认',
 };
 
 export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
@@ -215,7 +253,8 @@ export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
     frameTitle: 'Post and replies', panel: 'Post details', title: 'Post',
     failed: 'Couldn’t load the post', failedHint: 'Reload the extension and the page, then try again, or open it in a new tab.', retryHint: 'Try again, or open it in a new tab.',
     newTab: 'New tab', copyLink: 'Copy link', copiedLink: 'Link copied', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset widths', close: 'Close',
-    resizeNav: 'Resize navigation', resizeDetail: 'Resize timeline and post', resizeHint: 'Drag to resize; arrow keys to nudge; double-click to reset',
+    widths: 'Column widths', ratio: 'Timeline : Post', detailFocus: 'Detail focus', balanced: 'Balanced', timelineFocus: 'Timeline focus',
+    resizeNav: 'Resize navigation', resizeDetail: 'Resize timeline and post', resizeHint: 'Drag to resize (snaps to presets); arrow keys to nudge; double-click to reset',
   },
 };
 
@@ -282,6 +321,7 @@ export function installXColumns(options: {
   let openLink: HTMLAnchorElement;
   let copyLinkButton: HTMLButtonElement;
   let copyLinkTimer: ReturnType<typeof setTimeout> | undefined;
+  let widthControl: ReturnType<typeof createWidthControl> | undefined;
   let retry: HTMLButtonElement;
   let dividers: HTMLElement[] = [];
   let selected: string | undefined;
@@ -595,7 +635,8 @@ export function installXColumns(options: {
     back: 'M15 5l-7 7 7 7',
     forward: 'M9 5l7 7-7 7',
     search: 'M21 21l-4.5-4.5M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15',
-    reset: 'M4 4v5h5M4 9a8 8 0 1 1-1 7',
+    widths: 'M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4M12 4v16M7.5 10.5 6 12l1.5 1.5M16.5 10.5 18 12l-1.5 1.5',
+    reset: 'M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4',
     external: 'M14 4h6v6M20 4l-9 9M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5',
     copy: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
     check: 'M5 12.5l4.5 4.5L19 7.5',
@@ -627,6 +668,109 @@ export function installXColumns(options: {
     else localized(() => { element.textContent = t[label]; });
     element.addEventListener('click', action);
     return element;
+  }
+  function createWidthControl() {
+    const menu = document.createElement('div');
+    menu.className = 'se-width-menu';
+    menu.setAttribute('role', 'menu');
+    const heading = document.createElement('div');
+    heading.className = 'se-width-header';
+    heading.id = 'se-width-heading';
+    menu.setAttribute('aria-labelledby', heading.id);
+    localized(() => { heading.textContent = t.ratio; });
+    menu.append(heading);
+    const trigger = button('widths', () => menu.isConnected ? close() : open(), 'widths');
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+
+    function row(label: Label, action: () => void) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.tabIndex = -1;
+      const diagram = document.createElement('span');
+      diagram.className = 'se-width-diagram';
+      const name = document.createElement('span');
+      name.className = 'se-width-label';
+      localized(() => { name.textContent = t[label]; });
+      item.append(diagram, name);
+      item.addEventListener('click', () => { action(); close(true); });
+      menu.append(item);
+      return { item, diagram };
+    }
+
+    const items = widthPresets.map(preset => {
+      const { item, diagram } = row(preset.label, () => {
+        widths.share = preset.share;
+        renderWidths();
+        save();
+      });
+      item.setAttribute('role', 'menuitemradio');
+      for (const part of preset.parts) {
+        const column = document.createElement('i');
+        column.style.flex = String(part);
+        diagram.append(column);
+      }
+      const ratio = document.createElement('span');
+      ratio.className = 'se-width-ratio';
+      ratio.textContent = preset.parts.join(' : ');
+      const check = document.createElement('span');
+      check.className = 'se-width-check';
+      check.append(icon('check'));
+      item.append(ratio, check);
+      return item;
+    });
+    const line = document.createElement('div');
+    line.className = 'se-width-line';
+    line.setAttribute('role', 'separator');
+    menu.append(line);
+    const restore = row('reset', reset);
+    restore.item.setAttribute('role', 'menuitem');
+    restore.diagram.append(icon('reset'));
+    items.push(restore.item);
+
+    function sync() {
+      const active = activeWidthPreset(widths.share);
+      widthPresets.forEach((preset, i) => items[i].setAttribute('aria-checked', String(preset === active)));
+    }
+    function focusItem(item: HTMLButtonElement) {
+      for (const candidate of items) candidate.tabIndex = candidate === item ? 0 : -1;
+      item.focus();
+    }
+    function open() {
+      trigger.after(menu);
+      // Right-align with the trigger; the fixed panel is the offset parent.
+      menu.style.left = `${Math.max(8, trigger.offsetLeft + trigger.offsetWidth - menu.offsetWidth)}px`;
+      trigger.setAttribute('aria-expanded', 'true');
+      sync();
+      focusItem(items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0]);
+    }
+    function close(returnToTrigger = false) {
+      menu.remove();
+      trigger.setAttribute('aria-expanded', 'false');
+      if (returnToTrigger) trigger.focus();
+    }
+    trigger.addEventListener('keydown', event => {
+      if (!['Enter', ' ', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      open();
+    });
+    menu.addEventListener('keydown', event => {
+      const index = items.indexOf(document.activeElement as HTMLButtonElement);
+      switch (event.key) {
+        case 'ArrowDown': case 'ArrowUp':
+          focusItem(items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]);
+          break;
+        case 'Escape': close(true); break;
+        case 'Enter': case ' ': items[index]?.click(); break;
+        case 'Tab': close(true); return;
+        default: return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    return { trigger, sync, dismissOutside(target: Node | null) {
+      if (menu.isConnected && !menu.contains(target) && !trigger.contains(target)) close();
+    } };
   }
   function reset() { collapsed = false; saveCollapsed(); widths = { ...DEFAULT_COLUMNS }; renderWidths(); save(); }
   function saveCollapsed() {
@@ -692,7 +836,8 @@ export function installXColumns(options: {
     forwardButton = button('forward', () => history.forward(), 'forward');
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
+    widthControl = createWidthControl();
+    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, widthControl.trigger, button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close'));
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -851,12 +996,13 @@ export function installXColumns(options: {
     root.style.setProperty('--se-detail', `${detail}px`);
     root.toggleAttribute('data-site-enhancer-compact-nav', nav < 180);
     renderToggle();
+    widthControl?.sync();
     dividers.forEach((divider, index) => {
       divider.hidden = index === 0 && (collapsed || nativeCompact);
       divider.style.left = `${index === 0 ? nav : nav + feed}px`;
       divider.setAttribute('aria-valuenow', String(index === 0 ? nav : feed));
-      divider.setAttribute('aria-valuemin', index === 0 ? '88' : '360');
-      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : columnGeometry(width, { nav, share: .75 }).feed));
+      divider.setAttribute('aria-valuemin', String(index === 0 ? 88 : feedWidth(width - nav, .25)));
+      divider.setAttribute('aria-valuemax', String(index === 0 ? 280 : feedWidth(width - nav, .75)));
     });
   }
   function renderTheme() {
@@ -865,23 +1011,24 @@ export function installXColumns(options: {
     const channels = background.match(/[\d.]+/g)?.slice(0, 3).map(Number);
     const dark = channels && channels.reduce((sum, value) => sum + value, 0) < 384 && background !== 'rgba(0, 0, 0, 0)';
     root.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
+    panel.toggleAttribute('data-dark', !!dark);
     panel.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
     panel.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
     navToggle?.style.setProperty('--se-toggle-bg', `var(--se-x-bg,${background === 'rgba(0, 0, 0, 0)' ? '#fff' : background})`);
     navToggle?.style.setProperty('--se-toggle-fg', `var(--se-x-muted,${dark ? '#939da6' : '#536471'})`);
     navToggle?.style.setProperty('--se-toggle-hover', dark ? '#e7e9ea' : '#0f1419');
   }
-  function adjust(kind: number, delta: number) {
+  function adjust(kind: number, delta: number, snap = false) {
     const width = viewportWidth();
     const { nav, feed } = columnGeometry(width, collapsed || nativeCompact ? { ...widths, nav: 88 } : widths);
     if (kind === 0) { collapsed = false; widths.nav = Math.max(88, Math.min(280, nav + delta)); }
-    else widths.share = Math.max(.25, Math.min(.75, Math.max(360, Math.min(MAX_FEED, width - nav - 360, feed + delta)) / shareBasis(width - nav)));
+    else widths.share = adjustedFeedShare(width - nav, feed + delta, snap);
     renderWidths(width);
   }
   function move(event: PointerEvent) {
     if (!drag) return;
     widths = { ...drag.widths };
-    adjust(drag.kind, event.clientX - drag.x);
+    adjust(drag.kind, event.clientX - drag.x, true);
   }
   function end(event?: PointerEvent) {
     if (!drag) return;
@@ -924,6 +1071,7 @@ export function installXColumns(options: {
     locatePending = false;
     panel?.remove();
     panel = undefined;
+    widthControl = undefined;
     renderedWidth = undefined;
     nativeCompact = false;
     frame = undefined;
@@ -971,6 +1119,7 @@ export function installXColumns(options: {
   }
   function click(event: MouseEvent) {
     if (dismissing) return openFromClick(event);
+    widthControl?.dismissOutside(event.target as Node | null);
     const source = (event.target as Node | null)?.ownerDocument ?? document;
     for (const doc of [document, ...frameDocuments.values()]) if (doc !== source) dismissMenus(doc);
     const native = !event.defaultPrevented;
