@@ -1,3 +1,4 @@
+import { copyToClipboard } from './clipboard.ts';
 import { resolveLocale } from './i18n.ts';
 import { roundScreenshot, ScreenshotTooLargeError } from './x-screenshot.ts';
 
@@ -8,6 +9,7 @@ export type ScreenshotPreviewOptions = {
   scope?: ScreenshotScope;
   rounded?: boolean;
   onRoundedChange?: (value: boolean) => void;
+  copyText?: (scope: ScreenshotScope, invalidateImages: () => void) => Promise<string>;
   onClose?: () => void;
   rerender?: (opts: { hideMetrics: boolean; scope: ScreenshotScope }) => Promise<HTMLCanvasElement>;
 };
@@ -52,15 +54,17 @@ export function showScreenshotPreview(
   const view = doc.defaultView!;
   const zh = resolveLocale(doc.documentElement.lang || view.navigator?.language) === 'zh';
   const text = zh ? {
-    title: '截图预览', loading: '正在生成截图…', copy: '复制', download: '下载 PNG', close: '关闭',
+    textCopy: '复制文字', textCopied: '已复制文字', textFailed: '复制文字失败，请重试', empty: '没有可复制的文字',
+    title: '复制预览', loading: '正在生成截图…', copy: '复制', copyImage: '复制图片', download: '下载 PNG', close: '关闭',
     ready: '确认截图后复制或下载', copying: '正在复制…', copied: '已复制图片', downloading: '正在准备下载…', downloaded: '已开始下载',
     failed: '截图生成失败，请关闭后重试', copyFailed: '复制失败，请重试', downloadFailed: '下载失败，请重试',
-    hideMetrics: '隐藏互动数据', scope: '截图范围', post: '仅此推文', parent: '含原推文', thread: '完整串推', tooLong: '串推过长，无法生成截图', rounded: '圆角',
+    hideMetrics: '隐藏互动数据', scope: '复制范围', post: '仅此推文', parent: '含原推文', thread: '完整串推', tooLong: '串推过长，无法生成截图', rounded: '圆角',
   } : {
-    title: 'Screenshot preview', loading: 'Creating screenshot…', copy: 'Copy', download: 'Download PNG', close: 'Close',
+    textCopy: 'Copy text', textCopied: 'Text copied', textFailed: 'Text copy failed. Please try again.', empty: 'No text to copy',
+    title: 'Copy preview', loading: 'Creating screenshot…', copy: 'Copy', copyImage: 'Copy image', download: 'Download PNG', close: 'Close',
     ready: 'Review your screenshot before copying or saving', copying: 'Copying…', copied: 'Image copied', downloading: 'Preparing download…', downloaded: 'Download started',
     failed: 'Screenshot failed. Close and try again.', copyFailed: 'Copy failed. Please try again.', downloadFailed: 'Download failed. Please try again.',
-    hideMetrics: 'Hide metrics', scope: 'Screenshot scope', post: 'This post', parent: 'With original', thread: 'Full thread', tooLong: 'Thread is too long to capture', rounded: 'Rounded corners',
+    hideMetrics: 'Hide metrics', scope: 'Copy scope', post: 'This post', parent: 'With original', thread: 'Full thread', tooLong: 'Thread is too long to capture', rounded: 'Rounded corners',
   };
   const dark = isDarkHost(doc);
   const dialog = doc.createElement('dialog');
@@ -74,23 +78,26 @@ export function showScreenshotPreview(
 .se-screenshot-preview::backdrop{background:#0009}
 .se-screenshot-preview{position:fixed;inset:0;margin:5dvh auto auto;transition:height 150ms ease-out}
 @media(prefers-reduced-motion:reduce){.se-screenshot-preview{transition:none}}
-.se-shot-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:20px;background:var(--se-x-raised,#edf1f4)}
+.se-shot-body{flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:color-mix(in srgb,currentColor 30%,transparent) transparent;padding:20px;background:var(--se-x-raised,#edf1f4)}
 .se-shot-stack{position:relative;overflow:clip;overflow-clip-margin:12px}
 .se-shot-stack canvas{display:block;width:100%;height:auto;filter:drop-shadow(0 2px 8px #0003)}
 .se-shot-stack canvas[data-outgoing]{position:absolute;inset:0;pointer-events:none}
-.se-shot-toolbar{position:relative;z-index:2;box-sizing:border-box;flex:none;width:100%;display:flex;align-items:center;gap:8px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--se-x-border,#d5d9df);background:var(--se-x-bg,#fff)}
-.se-shot-actions{margin-left:auto;display:flex;align-items:center;gap:6px}
-.se-shot-scopes{display:flex;max-width:100%;box-sizing:border-box;padding:2px;border-radius:999px;background:color-mix(in srgb,currentColor 8%,transparent)}
-.se-shot-scopes button[role=radio]{min-width:0;min-height:32px;padding:0 12px;border-radius:999px;font:600 13px system-ui;color:color-mix(in srgb,currentColor 70%,transparent);overflow-wrap:anywhere}
-.se-shot-scopes button[aria-checked=true]{background:var(--se-x-bg,#fff);color:inherit;box-shadow:0 1px 3px #0002}
-.se-screenshot-preview[data-dark] button[aria-checked=true]{background:color-mix(in srgb,currentColor 14%,transparent);box-shadow:none}
+.se-shot-toolbar{position:relative;z-index:2;box-sizing:border-box;flex:none;width:100%;display:flex;align-items:center;gap:4px;padding:8px 10px 8px 12px;border-bottom:1px solid var(--se-x-border,#d5d9df);background:var(--se-x-bg,#fff)}
+.se-shot-actions{margin-left:auto;display:flex;align-items:center;gap:4px}
+.se-shot-scopes{display:flex;max-width:100%;box-sizing:border-box;margin-right:6px;padding:2px;border-radius:999px;background:color-mix(in srgb,currentColor 7%,transparent)}
+.se-shot-scopes button[role=radio]{min-width:0;min-height:30px;padding:0 12px;border-radius:999px;font:600 13px system-ui;color:color-mix(in srgb,currentColor 62%,transparent);overflow-wrap:anywhere}
+.se-shot-scopes button[aria-checked=true]{background:var(--se-x-bg,#fff);color:inherit;box-shadow:0 1px 2px #0003}
+.se-screenshot-preview[data-dark] button[aria-checked=true]{background:color-mix(in srgb,currentColor 16%,transparent);box-shadow:none}
 @media(max-width:559px){.se-shot-toolbar{flex-wrap:wrap}.se-shot-actions{max-width:100%;flex-wrap:wrap;justify-content:flex-end}}
-.se-screenshot-preview button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px;min-height:36px;border:0;border-radius:24px;background:transparent;color:inherit;font:600 14px system-ui;cursor:pointer}
+.se-screenshot-preview button{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:0;border:0;background:transparent;color:inherit;font:600 14px system-ui;cursor:pointer}
 .se-screenshot-preview button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.se-screenshot-preview button[aria-pressed=true]{color:var(--se-x-accent,#1d9bf0);background:color-mix(in srgb,currentColor 15%,transparent)}
-.se-screenshot-preview button[data-copy]{background:var(--se-x-accent,#1769d2);color:white;padding-inline:14px}
+.se-screenshot-preview .se-shot-icon{flex:none;width:36px;height:36px;padding:0;border-radius:50%}
+.se-shot-icon:hover:not(:disabled):not([aria-pressed=true]){background:color-mix(in srgb,currentColor 10%,transparent)}
+.se-screenshot-preview .se-shot-icon[aria-pressed=true]{color:var(--se-x-accent,#1d9bf0);background:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 14%,transparent)}
+.se-screenshot-preview[data-dark] .se-shot-icon[aria-pressed=true]{background:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 24%,transparent)}
+.se-screenshot-preview button[data-copy]{height:36px;padding:0 16px 0 13px;border-radius:999px;background:var(--se-x-accent,#1d9bf0);color:#fff}
 .se-screenshot-preview button:disabled{opacity:.5}
-.se-shot-divider{height:20px;border-left:1px solid var(--se-x-border,#aaa)}
+.se-shot-divider{width:1px;height:18px;background:color-mix(in srgb,currentColor 18%,transparent);margin:0 6px}
 .se-shot-spinner{width:12px;height:12px;border:2px solid #9995;border-top-color:currentColor;border-radius:50%;visibility:hidden}
 .se-shot-spinner[data-busy]{visibility:visible;animation:se-shot-spin .8s linear infinite}
 @keyframes se-shot-spin{to{transform:rotate(360deg)}}
@@ -103,20 +110,22 @@ export function showScreenshotPreview(
 `;
   const icons = {
     close: 'M6 6l12 12M18 6L6 18', metrics: 'M4 20h16M6 16V9m6 7V4m6 12v-5',
-    rounded: 'M4 20V10a6 6 0 0 1 6-6h10',
+    text: 'M5 7V5h14v2M12 5v14M9 19h6',
+    rounded: 'M4 4h6a10 10 0 0 1 10 10v6M4 9h.01M4 14.5h.01M4 20h.01M9.5 20h.01M15 20h.01',
     copy: 'M8 8h12v12H8zM5 15H3V3h12v2', check: 'M4 12l5 5L20 6',
     download: 'M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4',
   };
   function button(label: string, shortcut: string, icon: keyof typeof icons) {
     const el = doc.createElement('button');
     el.type = 'button';
+    if (icon !== 'copy') el.className = 'se-shot-icon';
     el.title = `${label} (${shortcut})`;
     el.setAttribute('aria-label', el.title);
     el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icons[icon]}"/></svg>`;
     return el;
   }
   const closeButton = button(text.close, 'Esc', 'close');
-  closeButton.className = 'se-shot-close';
+  closeButton.classList.add('se-shot-close');
   const body = doc.createElement('div'); body.className = 'se-shot-body';
   const stack = doc.createElement('div'); stack.className = 'se-shot-stack'; body.append(stack);
   const toolbar = doc.createElement('div'); toolbar.className = 'se-shot-toolbar';
@@ -124,7 +133,10 @@ export function showScreenshotPreview(
   const spinner = doc.createElement('span'); spinner.className = 'se-shot-spinner';
   const toast = doc.createElement('span'); toast.className = 'se-shot-toast';
   const download = button(text.download, 'S', 'download'); download.dataset.download = '';
-  const copy = button(text.copy, 'C', 'copy'); copy.dataset.copy = ''; copy.append(text.copy);
+  const copy = button(text.copyImage, 'C', 'copy'); copy.dataset.copy = ''; copy.append(text.copy);
+  const copyText = button(text.textCopy, 'T', 'text');
+  copyText.dataset.copyText = '';
+  const textIcon = copyText.querySelector('path')!;
   const copyIcon = copy.querySelector('path')!;
   let closed = false, renderGeneration = 0;
   let png: Promise<Blob> | undefined, downloadUrl: string | undefined;
@@ -133,7 +145,7 @@ export function showScreenshotPreview(
   let rounded = options.rounded ?? false;
   let hideMetrics = false;
   let shown: HTMLCanvasElement | undefined;
-  let spinTimer = 0, checkTimer = 0, toastTimer = 0;
+  let spinTimer = 0, checkTimer = 0, textCheckTimer = 0, toastTimer = 0;
   const key = (hide: boolean, id: ScreenshotScope) => `${hide}/${id}`;
   const cache = new Map([[key(false, scope), initialCanvas]]);
   function variant(hide: boolean, id: ScreenshotScope) {
@@ -142,7 +154,7 @@ export function showScreenshotPreview(
     if (!pending) {
       pending = options.rerender!({ hideMetrics: hide, scope: id });
       cache.set(cacheKey, pending);
-      void pending.catch(() => cache.delete(cacheKey));
+      void pending.catch(() => { if (cache.get(cacheKey) === pending) cache.delete(cacheKey); });
     }
     return pending;
   }
@@ -239,6 +251,7 @@ export function showScreenshotPreview(
   }
   const metrics = button(text.hideMetrics, 'H', 'metrics');
   const corners = button(text.rounded, 'R', 'rounded');
+  corners.dataset.corners = '';
   const group = doc.createElement('div');
   group.className = 'se-shot-scopes';
   group.setAttribute('role', 'radiogroup');
@@ -287,7 +300,9 @@ export function showScreenshotPreview(
   actions.className = 'se-shot-actions';
   const divider = doc.createElement('span');
   divider.className = 'se-shot-divider';
-  actions.append(spinner, download, copy, divider, closeButton);
+  actions.append(spinner, download);
+  if (options.copyText) actions.append(copyText);
+  actions.append(copy, divider, closeButton);
   toolbar.append(corners, actions, toast);
   dialog.append(style, toolbar, body, status);
 
@@ -296,8 +311,9 @@ export function showScreenshotPreview(
     closed = true;
     clearExport();
     resize.disconnect();
+    doc.removeEventListener('keydown', onDocumentKey, true);
     cache.clear();
-    for (const timer of [spinTimer, checkTimer, toastTimer]) view.clearTimeout(timer);
+    for (const timer of [spinTimer, checkTimer, textCheckTimer, toastTimer]) view.clearTimeout(timer);
     dialog.remove();
     if (trigger.isConnected) trigger.focus({ preventScroll: true });
     options.onClose?.();
@@ -320,6 +336,40 @@ export function showScreenshotPreview(
       if (png === selected) error(text.copyFailed);
     } finally {
       if (png === selected) copy.disabled = false;
+    }
+  }
+  async function performTextCopy() {
+    if (!options.copyText || copyText.disabled) return;
+    copyText.disabled = true;
+    const empty = new Error('Empty clipboard text');
+    try {
+      const value = options.copyText(scope, () => {
+        if (closed || !options.rerender) return;
+        cache.clear();
+        update();
+      }).then(value => {
+        if (!value.trim()) throw empty;
+        return value;
+      });
+      if (view.ClipboardItem && view.navigator.clipboard?.write) {
+        const blob = value.then(value => new Blob([value], { type: 'text/plain' }));
+        // Also handle a constructor that rejects promise inputs before consuming the blob.
+        void blob.catch(() => {});
+        try {
+          await view.navigator.clipboard.write([new view.ClipboardItem({ 'text/plain': blob })]);
+        } catch {
+          if (!await copyToClipboard(await value)) throw new Error('Text copy failed');
+        }
+      } else if (!await copyToClipboard(await value)) throw new Error('Text copy failed');
+      if (closed) return;
+      status.textContent = text.textCopied;
+      textIcon.setAttribute('d', icons.check);
+      view.clearTimeout(textCheckTimer);
+      textCheckTimer = view.setTimeout(() => textIcon.setAttribute('d', icons.text), 1500);
+    } catch (cause) {
+      if (!closed) error(cause === empty ? text.empty : text.textFailed);
+    } finally {
+      copyText.disabled = false;
     }
   }
   async function performDownload() {
@@ -351,7 +401,7 @@ export function showScreenshotPreview(
     if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
   });
   // Keep X and the image viewer from handling shortcuts intended for this modal.
-  dialog.addEventListener('keydown', event => {
+  function onKey(event: KeyboardEvent) {
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); close(); return; }
     if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
@@ -365,9 +415,17 @@ export function showScreenshotPreview(
       const next = /^[1-3]$/.test(key) ? Number(key) - 1 : (index + (key === 'arrowleft' ? -1 : 1) + scopes.length) % scopes.length;
       if (next < scopes.length) { event.preventDefault(); selectScope(next); }
     }
+    else if (key === 't' && options.copyText) { event.preventDefault(); void performTextCopy(); }
     else if (key === 'c' && !copy.disabled) { event.preventDefault(); void performCopy(); }
     else if (key === 's' && !download.disabled) { event.preventDefault(); performDownload(); }
-  });
+  }
+  // X can return focus to the body as its own More menu finishes closing.
+  function onDocumentKey(event: KeyboardEvent) {
+    if (event.target === doc.body || event.target === doc.documentElement) onKey(event);
+  }
+  doc.addEventListener('keydown', onDocumentKey, true);
+  dialog.addEventListener('keydown', onKey);
+  copyText.addEventListener('click', performTextCopy);
   copy.addEventListener('click', () => { void performCopy(); });
   download.addEventListener('click', performDownload);
   doc.body.append(dialog); dialog.showModal(); closeButton.focus();

@@ -111,6 +111,20 @@ export function collectThreadPosts(tweet: HTMLElement): HTMLElement[] {
   return end > start ? all.slice(start, end + 1) : [];
 }
 
+function markdownBody(post: HTMLElement, text: string) {
+  const images = Array.from(post.querySelectorAll<HTMLImageElement>(PHOTO_IMAGE))
+    .filter(img => belongsToTweet(img, post))
+    .map(img => {
+      try {
+        const u = new URL(img.currentSrc || img.src);
+        u.searchParams.set('name', 'orig');
+        return `![${(img.alt || 'image').replace(/[\[\]]/g, '')}](${u.href})`;
+      } catch { return ''; }
+    })
+    .filter(Boolean);
+  return [text, ...images].filter(Boolean).join('\n\n');
+}
+
 /** Format a multi-post author thread as Markdown, including original image links. */
 export function formatThreadMarkdown(posts: HTMLElement[]): string {
   const parts: string[] = [];
@@ -119,21 +133,39 @@ export function formatThreadMarkdown(posts: HTMLElement[]): string {
   for (const post of posts) {
     const { text, url } = getTweetData(post);
     if (!rootUrl && url) { rootUrl = url; author = authorFromUrl(url); }
-    const images = Array.from(post.querySelectorAll<HTMLImageElement>(PHOTO_IMAGE))
-      .filter(img => belongsToTweet(img, post))
-      .map(img => {
-        try {
-          const u = new URL(img.currentSrc || img.src);
-          u.searchParams.set('name', 'orig');
-          return `![${(img.alt || 'image').replace(/[\[\]]/g, '')}](${u.href})`;
-        } catch { return ''; }
-      })
-      .filter(Boolean);
-    const block = [text, ...images].filter(Boolean).join('\n\n');
+    const block = markdownBody(post, text);
     if (block) parts.push(block);
   }
   const header = author && rootUrl ? `# @${author} Thread\n\n${rootUrl}\n\n---\n\n` : rootUrl ? `${rootUrl}\n\n---\n\n` : '';
   return header + parts.join('\n\n---\n\n');
+}
+
+export function formatScopeText(posts: HTMLElement[], format: XCopyFormat = 'default'): string {
+  if (!posts.length) return '';
+  if (posts.length === 1) {
+    const data = getTweetData(posts[0]);
+    return data.text || data.url ? formatTweetCopy(data, format) : '';
+  }
+  const authors = posts.map(post => authorFromUrl(tweetPermalink(post)));
+  if (authors[0] && authors.every(author => author?.toLowerCase() === authors[0]!.toLowerCase())) {
+    return formatThreadMarkdown(posts);
+  }
+  return posts.map((post, i) => {
+    const { text, url } = getTweetData(post);
+    const attribution = [authors[i] && `**@${authors[i]}**`, url].filter(Boolean).join(' · ');
+    return [attribution, markdownBody(post, text)].filter(Boolean).join('\n\n');
+  }).filter(Boolean).join('\n\n---\n\n');
+}
+
+function previewScopes(tweet: HTMLElement) {
+  const parent = screenshotPosts(tweet, tweetPermalink);
+  const thread = screenshotThreadPosts(tweet, tweetPermalink);
+  const postsByScope = { post: [tweet], parent, thread };
+  const ids: ScreenshotScope[] = ['post'];
+  if (parent.length > 1) ids.push('parent');
+  if (thread.length > parent.length) ids.push('thread');
+  const scope = ids[ids.length - 1];
+  return { postsByScope, ids, scope, posts: postsByScope[scope] };
 }
 
 function screenshotFilename(url: string): string {
@@ -147,7 +179,6 @@ async function expandShowMore(tweet: HTMLElement): Promise<boolean> {
     .find(el => belongsToTweet(el, tweet));
   if (!button || !button.isConnected) return false;
   const before = getTweetData(tweet).text.length;
-  button.click();
   await new Promise<void>(resolve => {
     let done = false;
     const finish = () => { if (!done) { done = true; observer.disconnect(); clearTimeout(timer); resolve(); } };
@@ -156,6 +187,7 @@ async function expandShowMore(tweet: HTMLElement): Promise<boolean> {
     });
     observer.observe(tweet, { childList: true, subtree: true, characterData: true });
     const timer = setTimeout(finish, 400);
+    button.click();
   });
   return true;
 }
@@ -168,11 +200,11 @@ export function installXCopyMenu(options: {
   const getLabels = () => {
     const chinese = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
     return chinese ? {
-      image: '复制推文为截图', link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接',
+      image: '复制为图片或文字…', link: '复制推文和链接', text: '仅复制推文文字', url: '复制推文链接',
       thread: '复制串推 (Markdown)', copied: '已复制',
       failed: '复制失败，请重试', empty: '这条推文没有可复制的文字', missing: '无法获取推文链接',
     } : {
-      image: 'Copy post as image', link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link',
+      image: 'Copy as image or text…', link: 'Copy post with link', text: 'Copy post text only', url: 'Copy post link',
       thread: 'Copy thread (Markdown)', copied: 'Copied!',
       failed: 'Copy failed. Please try again.', empty: 'This post has no text to copy.', missing: 'Post link unavailable.',
     };
@@ -231,8 +263,8 @@ export function installXCopyMenu(options: {
 
   function prepareShot(current: Session) {
     if (session !== current || current.shot || !current.tweet.isConnected) return;
-    const posts = screenshotPosts(current.tweet, tweetPermalink);
-    // X may update or recycle either article while the menu is open.
+    const { posts } = previewScopes(current.tweet);
+    // X may update or recycle a captured article while the menu is open.
     const invalidate = () => {
       changes.disconnect();
       if (current.shot?.observer === changes) current.shot = undefined;
@@ -272,18 +304,12 @@ export function installXCopyMenu(options: {
       const t = getLabels();
       if (kind === 'image') {
         if (!current.tweet.isConnected || tweetPermalink(current.tweet) !== current.data.url) { toast.show(t.failed); return; }
-        const allPosts = screenshotPosts(current.tweet, tweetPermalink);
-        const thread = screenshotThreadPosts(current.tweet, tweetPermalink);
-        const postsByScope = { post: [current.tweet], parent: allPosts, thread };
-        const scope = allPosts.length > 1 ? 'parent' : 'post';
-        const ids: ScreenshotScope[] = ['post'];
-        if (scope === 'parent') ids.push('parent');
-        if (thread.length > allPosts.length) ids.push('thread');
+        const { postsByScope, ids, scope, posts } = previewScopes(current.tweet);
         const shot = current.shot;
         const canvas = shot && !shot.observer.takeRecords().length &&
-          shot.posts.length === allPosts.length && allPosts.every((post, index) => post === shot.posts[index])
-          ? shot.canvas.catch(() => renderPostScreenshot(allPosts))
-          : renderPostScreenshot(allPosts);
+          shot.posts.length === posts.length && posts.every((post, index) => post === shot.posts[index])
+          ? shot.canvas.catch(() => renderPostScreenshot(posts))
+          : renderPostScreenshot(posts);
         const filename = screenshotFilename(current.data.url);
         dismiss(current);
         closePreview?.();
@@ -294,6 +320,12 @@ export function installXCopyMenu(options: {
           scope,
           rounded: options.getRounded?.(),
           onRoundedChange: options.setRounded,
+          copyText: async (id, invalidate) => {
+            const selected = postsByScope[id];
+            const expanded = await Promise.all(selected.map(expandShowMore));
+            if (expanded.some(Boolean)) invalidate();
+            return formatScopeText(selected, options.getCopyFormat?.());
+          },
           rerender: ({ hideMetrics, scope }) => renderPostScreenshot(postsByScope[scope], { hideMetrics }),
         });
         return;
@@ -359,21 +391,16 @@ export function installXCopyMenu(options: {
         current.heights.push(parent);
       }
     }
-    const expectedCount = current.thread.length >= 2 ? 5 : 4;
+    const kinds: ('link' | 'text' | 'url' | 'image' | 'thread')[] = ['link', 'text', 'url', 'image'];
+    if (current.thread.length >= 2) kinds.push('thread');
     const existingItems = Array.from(menu.querySelectorAll(`.${ITEM}`));
-    if (existingItems.length === expectedCount && existingItems.every(item => dropdown.contains(item))) return;
+    if (existingItems.length === kinds.length && existingItems.every(item => dropdown.contains(item))) return;
     // X can move native items into Dropdown after initially mounting the menu.
     existingItems.forEach(item => item.remove());
     const nativeItem = dropdown.querySelector<HTMLElement>('[role="menuitem"]');
     if (!nativeItem) return;
     const color = getComputedStyle(nativeItem.querySelector('span') ?? nativeItem).color;
-    const items = [
-      createItem('link', current),
-      createItem('text', current),
-      createItem('url', current),
-      createItem('image', current),
-      ...(current.thread.length >= 2 ? [createItem('thread', current)] : []),
-    ];
+    const items = kinds.map(kind => createItem(kind, current));
     for (const item of items) item.style.color = color;
     nativeItem.before(...items);
   }

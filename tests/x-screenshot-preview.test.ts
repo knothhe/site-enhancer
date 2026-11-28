@@ -168,7 +168,8 @@ test('keyboard toggles reuse idle-rendered canvases and PNGs while the preview b
   assert.match(dialog.querySelector('style')!.textContent!,/max-height:90dvh/);
   assert.equal(dialog.querySelector('h2'),null);
   assert.equal(dialog.querySelector('[data-copy]')?.textContent,'Copy');
-  assert.equal(dialog.querySelector('[role=radiogroup]')!.getAttribute('aria-label'), 'Screenshot scope');
+  assert.equal(dialog.querySelector('[data-copy]')?.getAttribute('aria-label'),'Copy image (C)');
+  assert.equal(dialog.querySelector('[role=radiogroup]')!.getAttribute('aria-label'), 'Copy scope');
   const radios = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role=radio]'));
   assert.deepEqual(radios.map(r => [r.textContent, r.tabIndex, r.getAttribute('aria-checked')]), [
     ['This post', -1, 'false'], ['With original', 0, 'true'], ['Full thread · 4', -1, 'false'],
@@ -254,5 +255,41 @@ test('rounding reuses the source capture and exports the PNG of the displayed ca
   assert.equal(renders, 0);
   assert.equal(draws, 1);
   assert.deepEqual(changes, [true, false, true]);
+  close();
+});
+
+test('T starts a clipboard write during the gesture while the image is loading', async t => {
+  const { win, doc, trigger } = setup();
+  t.after(() => win.happyDOM.close());
+  let finish!: (text: string) => void;
+  let written: Promise<Blob> | undefined;
+  Object.defineProperty(win, 'ClipboardItem', { value: class {
+    data: Record<string, Promise<Blob>>;
+    constructor(data: Record<string, Promise<Blob>>) { this.data = data; }
+  } });
+  Object.defineProperty(win.navigator.clipboard, 'write', { value: async ([item]: { data: Record<string, Promise<Blob>> }[]) => {
+    written = item.data['text/plain'];
+    await written;
+  } });
+  const close = showScreenshotPreview(doc, new Promise(() => {}), trigger, {
+    scopes: [{ id: 'thread', count: 2 }],
+    copyText: scope => {
+      assert.equal(scope, 'thread');
+      return new Promise(resolve => { finish = resolve; });
+    },
+  });
+  const dialog = doc.querySelector('dialog')!;
+  const press = () => doc.body.dispatchEvent(new win.KeyboardEvent('keydown', { key: 't', bubbles: true }) as unknown as Event);
+  assert.equal(dialog.querySelector<HTMLButtonElement>('[data-copy]')!.disabled, true);
+  press();
+  assert.ok(written);
+  finish('First and second');
+  assert.equal(await (await written).text(), 'First and second');
+  await new Promise(setImmediate);
+  assert.equal(dialog.querySelector('[role=status]')!.textContent, 'Text copied');
+  press();
+  finish('');
+  await new Promise(setImmediate);
+  assert.equal(dialog.querySelector('.se-shot-toast')!.textContent, 'No text to copy');
   close();
 });

@@ -12,7 +12,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     textarea.value = text;
     textarea.setAttribute('aria-hidden', 'true');
     textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
-    document.body.appendChild(textarea);
+    (document.querySelector('dialog:modal') ?? document.body).appendChild(textarea);
     try {
       textarea.focus({ preventScroll: true });
       textarea.select();

@@ -1,7 +1,7 @@
 import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { collectThreadPosts, formatThreadMarkdown, formatTweetCopy, getTweetData, installXCopyMenu } from '../utils/x-menu.ts';
+import { collectThreadPosts, formatScopeText, formatThreadMarkdown, formatTweetCopy, getTweetData, installXCopyMenu } from '../utils/x-menu.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 
 let win: Window;
@@ -221,7 +221,7 @@ test('a keyboard click after keydown keeps the menu session', async () => {
 test('offers screenshot copying even for posts without text', async () => {
   cleanup = installXCopyMenu();
   const portal = await open(tweet(''));
-  const item = Array.from(portal.querySelectorAll('.site-enhancer-menuitem')).find(node => node.textContent === 'Copy post as image');
+  const item = Array.from(portal.querySelectorAll('.site-enhancer-menuitem')).find(node => node.textContent === 'Copy as image or text…');
   assert.ok(item);
 });
 
@@ -283,4 +283,48 @@ test('collects multi-post author thread on status page and offers thread markdow
   await flush();
   assert.equal(copied.length, 1);
   assert.match(copied[0], /First part[\s\S]*Second part/);
+});
+
+test('scope text preserves the post template, thread Markdown and per-author attribution', () => {
+  const first = tweet('One', '1'), second = tweet('Two', '2');
+  second.insertAdjacentHTML('beforeend', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/a?name=small" alt="Photo"></div>');
+  assert.equal(formatScopeText([first], 'plain'), 'One\nhttps://x.com/author/status/1');
+  assert.equal(formatScopeText([first, second]), formatThreadMarkdown([first, second]));
+  second.querySelector('a')!.href = '/bob/status/2';
+  assert.equal(formatScopeText([first, second]), [
+    '**@author** · https://x.com/author/status/1', 'One', '---',
+    '**@bob** · https://x.com/bob/status/2', 'Two', '![Photo](https://pbs.twimg.com/media/a?name=orig)',
+  ].join('\n\n'));
+});
+
+test('first post defaults to its connected thread and text copy expands the continuation', async () => {
+  Object.defineProperty(win, 'ClipboardItem', { value: undefined });
+  win.happyDOM.setURL('https://x.com/author/status/10');
+  const column = document.createElement('main');
+  column.dataset.testid = 'primaryColumn';
+  const root = tweet('First', '10'), next = tweet('Short', '11'), unrelated = tweet('Separate', '12');
+  column.append(root, next, unrelated);
+  document.body.append(column);
+  const rail = '<span style="background-color:gray"></span>';
+  root.insertAdjacentHTML('afterbegin', '<div><div data-post-avatar></div>' + rail + '</div>');
+  next.insertAdjacentHTML('afterbegin', '<div>' + rail + '<div data-post-avatar></div></div>');
+  root.querySelector('span')!.getBoundingClientRect = () => new win.DOMRect(0, 0, 2, 10) as DOMRect;
+  next.querySelector('span')!.getBoundingClientRect = () => new win.DOMRect(0, 10, 2, 10) as DOMRect;
+  const more = document.createElement('button');
+  more.dataset.testid = 'tweet-text-show-more-link';
+  next.append(more);
+  more.onclick = () => {
+    next.querySelector('[data-testid=tweetText]')!.textContent = 'Expanded continuation';
+    more.remove();
+  };
+  cleanup = installXCopyMenu();
+  const portal = await open(root);
+  portal.querySelectorAll<HTMLButtonElement>('.site-enhancer-menuitem')[3].click();
+  const dialog = document.querySelector('dialog')!;
+  assert.equal(dialog.getAttribute('aria-label'), 'Copy preview');
+  assert.equal(dialog.querySelector('[role=radio][aria-checked=true]')?.textContent, 'Full thread · 2');
+  dialog.querySelector<HTMLButtonElement>('[data-copy-text]')!.click();
+  await flush();
+  assert.deepEqual(copied, [formatThreadMarkdown([root, next])]);
+  assert.match(copied[0], /Expanded continuation/);
 });

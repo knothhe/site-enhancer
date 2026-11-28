@@ -375,7 +375,7 @@ await step('X More menu (keyboard)', async () => {
     await page.waitFor(`${label} menu`, `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 4;`);
     await sleep(300); // Give the observer time to (wrongly) inject twice.
     equal(`${label}: copy items injected once, before native items`, await page.eval(`return ${items};`),
-      ['Copy post with link', 'Copy post text only', 'Copy post link', 'Copy post as image', 'Not interested', 'Follow']);
+      ['Copy post with link', 'Copy post text only', 'Copy post link', 'Copy as image or text…', 'Not interested', 'Follow']);
     equal(`${label}: menu opened from keydown without a click`, await page.eval(`return window.__fixture;`), { caretClicks: 0, opens: ['keydown'] });
     check(`${label}: native height lock released`, await page.eval(`return document.querySelector('.fixture-height').getBoundingClientRect().height > 88;`));
     if (c === cases[0]) await page.shot('x-menu-keyboard-en');
@@ -415,7 +415,7 @@ await step('X screenshot preview and PNG copy', async () => {
         metrics.innerHTML = '<div role="group" style="height:24px">Metrics</div>';
         document.querySelector('#t1').append(metrics);
         const observer = new MutationObserver(() => {
-          const item = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent === 'Copy post as image');
+          const item = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent === 'Copy as image or text…');
           if (!item) return;
           observer.disconnect();
           const select = () => {
@@ -488,7 +488,7 @@ await step('X More menu (Chinese page)', async () => {
   await page.key(' ');
   await page.waitFor('menu', `return document.querySelectorAll('[role="menu"] .site-enhancer-menuitem').length === 4;`);
   equal('zh: labels follow the page language', await page.eval(`return [...document.querySelectorAll('.site-enhancer-menuitem')].map(i => i.textContent);`),
-    ['复制推文和链接', '仅复制推文文字', '复制推文链接', '复制推文为截图']);
+    ['复制推文和链接', '仅复制推文文字', '复制推文链接', '复制为图片或文字…']);
   await page.shot('x-menu-keyboard-zh');
   await page.close();
 });

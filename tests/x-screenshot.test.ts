@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
+import { installReplyResolver } from '../utils/x-reply.ts';
 import { screenshotSvg, screenshotPosts, screenshotThreadPosts, screenshotCornerRadius, screenshotBackground, warmScreenshotFonts } from '../utils/x-screenshot.ts';
 
 test('screenshot warmup shares in-flight CSS across posts using the same fonts and picks up different families', async t => {
@@ -70,10 +71,14 @@ test('conversation capture follows visible ancestors and only the connected repl
   doc.querySelector('#p5')!.insertAdjacentHTML('beforeend', post(10, false, true));
   doc.querySelector('#p9')!.insertAdjacentHTML('beforeend', line);
   const collect = (id: number) => screenshotThreadPosts(doc.querySelector<HTMLElement>(`#p${id}`)!,
-    node => 'https://x.com/alice/status/' + node.id.slice(1)).map(node => Number(node.id.slice(1)));
+    node => 'https://x.com/' + (node.getAttribute('data-author') ?? 'alice') + '/status/' + node.id.slice(1)).map(node => Number(node.id.slice(1)));
   assert.deepEqual(collect(2), [1, 2]);
   assert.deepEqual(collect(3), [1, 2, 3]);
   assert.deepEqual(collect(8), [1, 2, 3, 6, 7, 8]);
+  assert.deepEqual(collect(6), [1, 2, 3, 6, 7, 8]);
+  doc.querySelector('#p8')!.setAttribute('data-author', 'bob');
+  assert.deepEqual(collect(6), [1, 2, 3, 6, 7]);
+  doc.querySelector('#p8')!.removeAttribute('data-author');
   assert.deepEqual(collect(9), [1, 2, 3, 9]);
   doc.querySelector('#p7')!.remove(); // Virtualized gap between two otherwise matching lines.
   assert.deepEqual(collect(8), [1, 2, 3, 8]);
@@ -151,4 +156,31 @@ test('serialized screenshots replace each entire player with the displayed poste
   assert.equal(players[0].querySelectorAll('span').length,2);
   assert.equal(players[1].querySelector('span'),null);
   assert.equal(article.querySelectorAll('video').length,2);
+});
+
+test('explicit reply IDs connect only the matching post and previous parent, without visible rails', async t => {
+  const win = new Window({ url: 'https://x.com/alice/status/1' });
+  t.after(() => win.happyDOM.close());
+  const doc = win.document as unknown as Document;
+  doc.body.innerHTML = '<main data-testid="primaryColumn">' + [1, 2, 3].map(id =>
+    `<article data-testid="tweet" data-url="https://x.com/alice/status/${id}"></article>`).join('') + '</main>';
+  const [root, next, last] = doc.querySelectorAll<HTMLElement>('article');
+  const dispose = installReplyResolver(doc);
+  t.after(dispose);
+  const collect = () => screenshotThreadPosts(root, post => post.getAttribute('data-url')!);
+  const setRelation = (post: HTMLElement, child: string, parent?: string) => Object.assign(post, {
+    __reactFiber$example: { return: { memoizedProps: { tweet: { id_str: child, in_reply_to_status_id_str: parent } } } },
+  });
+  setRelation(next, '2', '1');
+  setRelation(last, '3', '2');
+  assert.deepEqual(collect(), [root, next, last]);
+  setRelation(last, '3', '1');
+  assert.deepEqual(collect(), [root, next]);
+  setRelation(next, '2');
+  assert.deepEqual(collect(), [root]);
+  setRelation(next, '99', '1');
+  assert.deepEqual(collect(), [root]);
+  setRelation(next, '2', '1');
+  next.dataset.url = 'https://x.com/bob/status/2';
+  assert.deepEqual(collect(), [root]);
 });

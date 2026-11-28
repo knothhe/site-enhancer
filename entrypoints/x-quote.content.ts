@@ -1,4 +1,5 @@
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote';
+import { installReplyResolver } from '../utils/x-reply';
 
 export default defineContentScript({
   matches: ['*://*.x.com/*', '*://*.twitter.com/*'],
@@ -18,6 +19,10 @@ export default defineContentScript({
     const host = window as Window & { __seQuoteCleanup?: () => void };
     host.__seQuoteCleanup?.();
     document.addEventListener(QUOTE_REQUEST, resolve);
-    host.__seQuoteCleanup = () => document.removeEventListener(QUOTE_REQUEST, resolve);
+    const releaseReplyResolver = installReplyResolver(document);
+    host.__seQuoteCleanup = () => {
+      document.removeEventListener(QUOTE_REQUEST, resolve);
+      releaseReplyResolver();
+    };
   },
 });

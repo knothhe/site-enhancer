@@ -1,4 +1,5 @@
 import { PRIMARY, POST, PLAYER } from './x-dom.ts';
+import { hasReplyParent } from './x-reply.ts';
 import { isGifVideo } from './x-video-playback.ts';
 import { getFontEmbedCSS, toSvg } from 'html-to-image';
 
@@ -61,18 +62,31 @@ export function screenshotPosts(tweet: HTMLElement, permalink: Permalink): HTMLE
 function avatarConnector(post: HTMLElement, above: boolean): DOMRect | undefined {
   const avatar = post.querySelector<HTMLElement>('[data-post-avatar], [data-testid^="UserAvatar-Container-"]');
   if (!avatar || avatar.closest(POST) !== post) return;
+  function paintedConnector(line: Element): DOMRect | undefined {
+    const style = post.ownerDocument.defaultView!.getComputedStyle(line);
+    const rect = line.getBoundingClientRect();
+    if (rect.width >= 1 && rect.width <= 3 && rect.height > rect.width &&
+        style.visibility !== 'hidden' && style.backgroundColor &&
+        !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor)) return rect;
+  }
+  // Responsive-web puts the upper half in a separate row above the avatar row.
+  const legacyAvatar = avatar.closest('[data-testid="Tweet-User-Avatar"]');
+  if (above && legacyAvatar) {
+    const upperRow = legacyAvatar.parentElement?.parentElement?.previousElementSibling;
+    const rail = upperRow?.querySelector(':scope > div > div:first-child > div:only-child:empty');
+    if (rail) {
+      const rect = paintedConnector(rail);
+      const face = legacyAvatar.getBoundingClientRect();
+      if (rect && Math.abs((rect.left + rect.right - face.left - face.right) / 2) <= 1) return rect;
+    }
+  }
   for (let node: Element | null = avatar; node && node !== post; node = node.parentElement) {
     const sibling = above ? node.previousElementSibling : node.nextElementSibling;
     if (sibling) {
       if (!sibling.matches('div,span') || sibling.textContent?.trim()) return;
       const line = sibling.firstElementChild ?? sibling;
       if (line.childElementCount) return;
-      const style = post.ownerDocument.defaultView!.getComputedStyle(line);
-      const rect = line.getBoundingClientRect();
-      if (rect.width >= 1 && rect.width <= 3 && rect.height > rect.width &&
-          style.visibility !== 'hidden' && style.backgroundColor &&
-          !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor)) return rect;
-      return;
+      return paintedConnector(line);
     }
     // x-web has an explicit rail. Legacy avatars can have extra wrappers.
     if (avatar.hasAttribute('data-post-avatar') || node.parentElement?.childElementCount !== 1) return;
@@ -86,7 +100,7 @@ function connectedReplies(earlier: HTMLElement, later: HTMLElement) {
   return end && start && Math.abs(end.left - start.left) <= 1 && Math.abs(end.bottom - start.top) <= 2;
 }
 
-/** Visible ancestors followed by the contiguous, connected tail ending at the target. */
+/** Visible ancestors, the selected reply branch, and its connected author continuation. */
 export function screenshotThreadPosts(tweet: HTMLElement, permalink: Permalink): HTMLElement[] {
   const column = tweet.closest(PRIMARY);
   const id = detailStatusId(tweet);
@@ -96,12 +110,25 @@ export function screenshotThreadPosts(tweet: HTMLElement, permalink: Permalink):
   const focal = focalIndex(posts, id, permalink);
   const target = posts.indexOf(tweet);
   if (focal < 0 || target < 0) return [];
-  if (target <= focal) return posts.slice(0, target + 1);
+  const identity = (post: HTMLElement) => permalink(post).match(/^https?:\/\/[^/]+\/(\w+)\/status\/(\d+)$/);
+  const targetIdentity = identity(tweet);
+  let previousId = targetIdentity?.[2];
+  const author = targetIdentity?.[1].toLowerCase();
+  let end = target;
+  while (previousId && end + 1 < posts.length) {
+    const next = posts[end + 1];
+    const nextIdentity = identity(next);
+    if (!nextIdentity || nextIdentity[1].toLowerCase() !== author) break;
+    if (!connectedReplies(posts[end], next) && !hasReplyParent(next, nextIdentity[2], previousId)) break;
+    previousId = nextIdentity[2];
+    end++;
+  }
+  if (target <= focal) return posts.slice(0, end + 1);
   let start = target;
   while (start > focal + 1 && connectedReplies(posts[start - 1], posts[start])) {
     start--;
   }
-  return [...posts.slice(0, focal + 1), ...posts.slice(start, target + 1)];
+  return [...posts.slice(0, focal + 1), ...posts.slice(start, end + 1)];
 }
 
 export class ScreenshotTooLargeError extends Error {}
