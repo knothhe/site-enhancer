@@ -3,6 +3,7 @@ import { VIDEO_PLAY_REQUEST } from './x-video-gate.ts';
 
 /** Page-local like the other layout preferences, so every X tab and detail frame shares it. */
 export const VIDEO_VOLUME_KEY = 'site-enhancer:x-video-volume';
+export const VIDEO_RATE_KEY = 'site-enhancer:x-video-rate';
 export type VideoVolume = { volume: number; muted: boolean };
 
 const DIALOG = '[role="dialog"],[aria-modal="true"]';
@@ -29,7 +30,7 @@ export function isGifVideo(video: HTMLVideoElement) {
   if (!video.loop) return false;
   const player = playerOf(video);
   if (!player) return false;
-  return !player.querySelector(`${SCRUBBER}, [role="slider"], svg[data-icon^="icon-sound-"]`);
+  return !Array.from(player.querySelectorAll(`${SCRUBBER}, [role="slider"], svg[data-icon^="icon-sound-"]`)).some(control => !control.closest('.se-video-chrome'));
 }
 function isInViewport(video: HTMLVideoElement) {
   const view = video.ownerDocument.defaultView;
@@ -44,9 +45,10 @@ function isInViewport(video: HTMLVideoElement) {
 /** Whether a press is on a player's volume control: X pairs the mute button with the only slider
  * outside the scrubber. Labels are localized, so the structure identifies it. */
 function onVolumeControl(target: Element, player: HTMLElement) {
+  if (target.closest('.se-video-chrome')) return false;
   if (target.closest('button')?.querySelector('svg[data-icon^="icon-sound-"]')) return true;
   for (const slider of player.querySelectorAll('[role="slider"]')) {
-    if (slider.closest(SCRUBBER)) continue;
+    if (slider.closest(SCRUBBER + ',.se-video-chrome')) continue;
     let wrap = slider.parentElement;
     while (wrap && wrap !== player && !wrap.querySelector(':scope>button')) wrap = wrap.parentElement;
     if (wrap && wrap !== player && !wrap.querySelector(SCRUBBER) && wrap.contains(target)) return true;
@@ -73,6 +75,32 @@ export function installXVideoPlayback(options: {
   let chosen: HTMLElement | undefined;
   // Videos stopped to make room. X may still ask for them while the other one plays.
   let displaced = new WeakSet<HTMLVideoElement>();
+  let rate = 1;
+  let held: HTMLVideoElement | undefined;
+  function applyRate(video: HTMLVideoElement) {
+    const value = video === held ? 2 : rate;
+    if (video.playbackRate !== value && !isGifVideo(video)) video.playbackRate = value;
+  }
+  function readRate() {
+    try {
+      const saved = Number(localStorage.getItem(VIDEO_RATE_KEY));
+      rate = saved >= .25 && saved <= 4 ? saved : 1;
+    } catch { /* Storage is optional. */ }
+  }
+  function syncRates() {
+    documents.forEach((_, doc) => doc.querySelectorAll('video').forEach(applyRate));
+  }
+  function setRate(video: HTMLVideoElement, value: number) {
+    if (isGifVideo(video)) return;
+    rate = Math.max(.25, Math.min(4, value));
+    try { localStorage.setItem(VIDEO_RATE_KEY, String(rate)); } catch { /* Retain on this page. */ }
+    syncRates();
+  }
+  function holdRate(video: HTMLVideoElement, active: boolean) {
+    if (isGifVideo(video) || (!active && held !== video)) return;
+    held = active ? video : undefined;
+    applyRate(video);
+  }
   let volume: VideoVolume | undefined;
   let press: { player: HTMLElement; held: boolean; time: number; volumeControl: boolean; level?: number } | undefined;
   let corrections = new WeakMap<HTMLVideoElement, { count: number; time: number }>();
@@ -121,6 +149,7 @@ export function installXVideoPlayback(options: {
     if (video.paused) return;
     if (!allowed(video)) { stop(video); return; }
     if (isGifVideo(video)) return;
+    applyRate(video);
     const before = holder;
     holder = video;
     displaced.delete(video);
@@ -178,6 +207,7 @@ export function installXVideoPlayback(options: {
     applyAll(video);
   }
   function stored(event: StorageEvent) {
+    if (event.key === null || event.key === VIDEO_RATE_KEY) { readRate(); syncRates(); }
     if (event.key !== null && event.key !== VIDEO_VOLUME_KEY) return;
     readVolume();
     applyAll();
@@ -197,6 +227,8 @@ export function installXVideoPlayback(options: {
       const video = asVideo(event);
       if (!video) return;
       settle(video);
+      // The play event may arrive after a pause or a source replacement.
+      applyRate(video);
       later(() => applyVolume(video));
     }
     function ready(event: Event) {
@@ -250,7 +282,7 @@ export function installXVideoPlayback(options: {
     for (const [type, listener] of listeners) doc.addEventListener(type, listener, true);
     doc.addEventListener('scroll', onScroll, { capture: true, passive: true });
     if (!documents.size) {
-      readVolume();
+      readRate(); readVolume();
       window.addEventListener('storage', stored);
     }
     documents.set(doc, () => {
@@ -262,7 +294,7 @@ export function installXVideoPlayback(options: {
     });
     const videos = Array.from(doc.querySelectorAll<HTMLVideoElement>('video'));
     const prioritized = [...videos].sort((a, b) => rank(b) - rank(a));
-    for (const video of prioritized) { settle(video); applyVolume(video); }
+    for (const video of prioritized) { settle(video); applyVolume(video); applyRate(video); }
   }
   function detach(doc: Document) {
     documents.get(doc)?.();
@@ -271,7 +303,25 @@ export function installXVideoPlayback(options: {
   return {
     attach,
     detach,
-    settle,
+    settle, setRate, holdRate, rate: () => rate,
+    enter(video: HTMLVideoElement) {
+      applyVolume(video); applyRate(video);
+      if (video.paused) void video.play()?.catch(() => {});
+    },
+    setVolume(video: HTMLVideoElement, level: number) {
+      if (isGifVideo(video)) return;
+      // Keep the last audible level when the slider reaches zero.
+      if (level > 0) video.volume = Math.min(1, level);
+      video.muted = level <= 0;
+      remember(video);
+    },
+    toggleMute(video: HTMLVideoElement) {
+      if (isGifVideo(video)) return;
+      const silent = video.muted || video.volume === 0;
+      if (silent && video.volume === 0) video.volume = volume?.volume || 1;
+      video.muted = !silent;
+      remember(video);
+    },
     isPlaying: () => activeHolder(holder),
     /** Pause everything in a document except the expanded video, forgetting what the user started there. */
     pause(doc: Document) {
@@ -285,6 +335,7 @@ export function installXVideoPlayback(options: {
     remove() {
       for (const doc of [...documents.keys()]) detach(doc);
       holder = chosen = press = volume = undefined;
+      held = undefined;
       displaced = new WeakSet();
       corrections = new WeakMap();
     },

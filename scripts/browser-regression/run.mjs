@@ -322,7 +322,22 @@ await step('x-web columns and native layout fallback', async () => {
     equal('plain post text copied from x-web menu', await page.clipboard(), [{ text: 'Sample text', via: 'clipboard' }]);
     check('x-web menu dismissed', await page.eval("return !document.querySelector('[role=menu]')"));
     await page.click('a[href$="/photo/1"]');
-    check('opens image viewer', await page.eval("return !!document.getElementById('site-enhancer-image-viewer')"));
+    equal('opens the first item in the mixed media viewer', await page.eval("return document.querySelector('#site-enhancer-media-viewer .se-image-count')?.textContent"), '1 / 2');
+    const chromeGeometry = root => page.eval(`
+      const container = document.querySelector(${JSON.stringify(root)});
+      return ['header > button','header .se-image-count','header > button:last-child','[data-direction=next]'].map(selector => {
+        const element = container.querySelector(selector);
+        const {x,y,width,height} = element.getBoundingClientRect();
+        return [x,y,width,height];
+      });
+    `);
+    const imageChrome = await chromeGeometry('#site-enhancer-media-viewer');
+    await page.click('[data-direction="next"]');
+    await page.waitFor('video with shared chrome', "return document.querySelector('[data-site-enhancer-video-expanded] header .se-image-count')?.textContent === '2 / 2'");
+    equal('top and side controls keep their image-viewer geometry', await chromeGeometry('.se-video-chrome'), imageChrome);
+    await page.click('.se-video-chrome [data-direction="previous"]');
+    await page.waitFor('image after fullscreen swap', "return document.querySelector('#site-enhancer-media-viewer[open] .se-image-count')?.textContent === '1 / 2'");
+    await page.click('#site-enhancer-media-viewer header button');
     await setStyle('reading', 'graphite');
     await page.waitFor('reading typography', "return getComputedStyle(document.querySelector('article [dir=auto]')).fontSize === '17px'");
     await page.waitFor('x-web palette', "return getComputedStyle(document.documentElement).getPropertyValue('--x-bg-primary').trim() === '#f5f6f8'");
@@ -395,6 +410,10 @@ await step('X screenshot preview and PNG copy', async () => {
         const marker = document.createElement('span');
         marker.style.cssText = 'position:absolute;inset:calc(50% - 8px) auto auto calc(50% - 8px);width:16px;height:16px;background:#3478ad';
         document.querySelector('#t1').append(marker);
+        const metrics = document.createElement('div');
+        metrics.style.paddingTop = '12px';
+        metrics.innerHTML = '<div role="group" style="height:24px">Metrics</div>';
+        document.querySelector('#t1').append(metrics);
         const observer = new MutationObserver(() => {
           const item = [...document.querySelectorAll('[role="menuitem"]')].find(node => node.textContent === 'Copy post as image');
           if (!item) return;
@@ -432,6 +451,20 @@ await step('X screenshot preview and PNG copy', async () => {
         type: 'image/png', signature: [137, 80, 78, 71, 13, 10, 26, 10], width, height,
         corner: [255, 255, 255, 255], center: [52, 120, 173, 255],
       }]);
+      const previewGeometry = () => page.eval(`
+        const dialog = document.querySelector('.se-screenshot-preview');
+        const canvas = dialog.querySelector('canvas:not([data-outgoing])');
+        const body = dialog.querySelector('.se-shot-body');
+        return { height:dialog.offsetHeight, top:dialog.getBoundingClientRect().top, gap:body.getBoundingClientRect().bottom - canvas.getBoundingClientRect().bottom };
+      `);
+      const before = await previewGeometry();
+      await page.click('.se-screenshot-preview button[aria-pressed]');
+      await page.waitFor('metrics variant ready', "return !!document.querySelector('.se-screenshot-preview [data-copy]:enabled')");
+      await page.eval("return new Promise(resolve => setTimeout(resolve, 180))");
+      const after = await previewGeometry();
+      equal('screenshot preview top stays anchored', after.top, before.top);
+      check('omitting metrics shortens the preview', after.height < before.height, {before,after});
+      check('short preview fits its canvas and body padding', Math.abs(after.gap - 20) <= 1, after);
     } finally {
       await page.close();
     }

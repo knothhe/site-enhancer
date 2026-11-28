@@ -233,6 +233,182 @@ test('video expansion keeps the original node and source, then restores focus an
   assert.equal(player.querySelector('button'), null);
 });
 
+test('mixed viewer requests the next fullscreen surface before releasing the old one', async () => {
+  const { player, video } = addVideo();
+  player.insertAdjacentHTML('beforebegin', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/one"></div>');
+  player.insertAdjacentHTML('afterend', '<div role="link"><div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/quote"></div></div>');
+  start(); click('[data-site-enhancer-video-expand]');
+  await Promise.resolve();
+  assert.equal(player.querySelector('.se-image-count')?.textContent, '2 / 2');
+  assert.ok(player.querySelector('.se-image-count svg'));
+  const header = player.querySelector('header')!;
+  const host = document.querySelector('dialog')!.parentElement!;
+  const exits: Element[] = [];
+  const originalExit = document.exitFullscreen;
+  document.exitFullscreen = async () => { exits.push(document.fullscreenElement!); await originalExit(); };
+  host.requestFullscreen = async () => {
+    assert.equal(document.fullscreenElement, player);
+    assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
+    Object.defineProperty(document,'fullscreenElement',{configurable:true,value:host});
+    document.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
+  };
+  viewerKey('Home'); await Promise.resolve();
+  assert.equal(document.fullscreenElement, host);
+  assert.equal(video.paused, true);
+  assert.equal(document.querySelector('dialog header'), header);
+  assert.equal(header.querySelector('.se-image-count')?.textContent, '1 / 2');
+  viewerKey('ArrowDown'); await Promise.resolve();
+  assert.equal(document.fullscreenElement,player);
+  assert.equal(player.querySelector('header'),header);
+  assert.deepEqual(exits,[]);
+  viewerKey('Escape'); await Promise.resolve();
+  assert.deepEqual(exits,[player]);
+});
+
+test('speed popover, wheel, keyboard presets and replacement video share the remembered rate', async () => {
+  const { player, video } = addVideo();
+  localStorage.setItem('site-enhancer:x-video-rate','1.5');
+  start();
+  const pill = player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-speed]')!;
+  assert.equal(video.playbackRate,1.5);
+  player.getBoundingClientRect = () => new win.DOMRect(0,0,320,180);
+  assert.ok(pill.querySelector('svg'));
+  pill.click();
+  const panel = player.querySelector<HTMLElement>('[data-site-enhancer-video-popover]')!;
+  assert.equal(panel.style.width,'232px');
+  assert.deepEqual([...panel.querySelectorAll('button[role=radio]')].map(el => el.textContent),['0.5','0.75','1','1.25','1.5','1.75','2','3']);
+  assert.equal(getComputedStyle(panel.querySelector('[role=radiogroup]')!).display,'grid');
+  assert.equal(getComputedStyle(panel).bottom,'');
+  assert.equal(player.querySelector('[aria-checked=true]')?.textContent,'1.5');
+  const key = (value: string) => document.activeElement!.dispatchEvent(new win.KeyboardEvent('keydown',{key:value,bubbles:true,cancelable:true}) as unknown as Event);
+  key('ArrowRight'); key('Enter');
+  assert.equal(video.playbackRate,1.75);
+  assert.equal(pill.getAttribute('aria-expanded'),'false');
+  pill.dispatchEvent(new win.WheelEvent('wheel',{deltaY:-20,bubbles:true,cancelable:true}) as unknown as Event);
+  assert.equal(localStorage.getItem('site-enhancer:x-video-rate'),'2');
+  assert.equal(player.querySelector('[data-site-enhancer-video-hud]')?.textContent,'2×');
+  const replacement = document.createElement('video');
+  video.replaceWith(replacement);
+  replacement.dispatchEvent(new win.Event('play') as unknown as Event);
+  assert.equal(replacement.playbackRate,2);
+  click('[data-site-enhancer-video-expand]'); await Promise.resolve();
+  pill.click();
+  assert.ok(pill.closest('.se-video-bar'));
+  assert.equal(getComputedStyle(panel).top,'auto');
+  key('Escape');
+  assert.ok(player.hasAttribute('data-site-enhancer-video-expanded'));
+  assert.equal(pill.getAttribute('aria-expanded'),'false');
+});
+
+test('viewer sliders capture a drag, own navigation keys and share the chosen volume', async () => {
+  const {player,video} = addVideo();
+  player.insertAdjacentHTML('beforebegin','<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/one"></div>');
+  Object.defineProperty(video,'duration',{value:80});
+  Object.defineProperty(video,'buffered',{value:{length:2,start:(i: number) => i * 40,end:(i: number) => i * 40 + 20}});
+  start(); click('[data-site-enhancer-video-expand]'); await Promise.resolve();
+  const [seek,volume] = player.querySelectorAll<HTMLElement>('.se-video-bar [role=slider]');
+  for (const slider of [seek,volume]) {
+    slider.getBoundingClientRect = () => new win.DOMRect(20,0,100,24);
+    let captured = -1;
+    slider.setPointerCapture = id => { captured = id; };
+    for (const [type,x] of [['pointerdown',45],['pointermove',95],['pointerup',95]] as const) {
+      slider.dispatchEvent(new win.PointerEvent(type,{bubbles:true,cancelable:true,button:0,pointerId:4,clientX:x}) as unknown as Event);
+      assert.equal(captured,4);
+      assert.equal(Number(slider.getAttribute('aria-valuenow')), (x - 20) * (slider === seek ? .8 : 1));
+    }
+  }
+  assert.deepEqual(JSON.parse(localStorage.getItem('site-enhancer:x-video-volume')!),{volume:.75,muted:false});
+  assert.equal(seek.getAttribute('aria-valuetext'),'1:00 / 1:20');
+  assert.equal(seek.querySelectorAll('i').length,2);
+  assert.equal(seek.querySelectorAll('i')[1].style.left,'50%');
+  const key = (slider: HTMLElement,k: string) => slider.dispatchEvent(new win.KeyboardEvent('keydown',{key:k,bubbles:true,cancelable:true}) as unknown as Event);
+  for (const [k,expected] of [['ArrowLeft',55],['ArrowRight',60],['End',80],['Home',0]] as const) {
+    key(seek,k); assert.equal(video.currentTime,expected);
+  }
+  for (const [k,expected] of [['ArrowLeft',70],['ArrowRight',75],['Home',0],['End',100]] as const) {
+    key(volume,k); assert.equal(volume.getAttribute('aria-valuenow'),String(expected));
+    assert.equal(video.muted,expected === 0);
+  }
+  assert.equal(document.fullscreenElement,player);
+});
+
+test('surface and PiP buttons operate on the original video and release the PiP override', async () => {
+  const {player,video,play} = addVideo();
+  video.play = async () => { play(); };
+  Object.defineProperty(document,'pictureInPictureEnabled',{value:true});
+  video.setAttribute('disablepictureinpicture','');
+  let requested: HTMLVideoElement | undefined;
+  video.requestPictureInPicture = async function () {
+    requested = this;
+    return {} as PictureInPictureWindow;
+  };
+  start(); click('[data-site-enhancer-video-expand]'); await Promise.resolve();
+  click('video');
+  assert.ok(video.paused);
+  click('.se-video-row > button');
+  assert.equal(video.paused,false);
+  assert.equal(video.hasAttribute('disablepictureinpicture'),false);
+  click('.se-video-row button[aria-label="画中画"]');
+  assert.equal(requested,video);
+  viewerKey('Escape');
+  assert.ok(video.hasAttribute('disablepictureinpicture'));
+});
+
+test('GIF controls omit sound, speed, clock and PiP, including after a player refresh', async () => {
+  const {player,video} = addVideo();
+  player.querySelector('[role=slider]')!.remove(); video.loop = true;
+  Object.defineProperty(document,'pictureInPictureEnabled',{value:true});
+  start(); click('[data-site-enhancer-video-expand]');
+  player.append(video); await new Promise(resolve => setTimeout(resolve,5));
+  const bar = player.querySelector('.se-video-bar')!;
+  assert.equal(bar.querySelectorAll('button').length,1);
+  assert.equal(bar.querySelectorAll('[role=slider]').length,1);
+  assert.equal(bar.querySelector('.se-speed,.se-volume,.se-video-row span'),null);
+});
+
+test('expanded player hides only native controls and restores them on exit', async () => {
+  const {player,video} = addVideo();
+  const component = player.querySelector('[data-testid=videoComponent]')!;
+  const native = document.createElement('div');
+  native.innerHTML = '<div data-testid="scrubber"><div role="slider"></div></div><div><button></button></div>';
+  component.append(native);
+  const caption = document.createElement('div'); caption.dataset.readomiSubtitles = ''; component.append(caption);
+  start(); click('[data-site-enhancer-video-expand]'); await Promise.resolve();
+  assert.ok(native.hasAttribute('data-se-native-controls'));
+  assert.equal(video.closest('[data-se-native-controls]'),null);
+  assert.equal(caption.closest('[data-se-native-controls]'),null);
+  const replacement = native.cloneNode(true) as HTMLElement;
+  replacement.removeAttribute('data-se-native-controls');
+  native.replaceWith(replacement); await new Promise(resolve => setTimeout(resolve,5));
+  assert.ok(replacement.hasAttribute('data-se-native-controls'));
+  viewerKey('Escape');
+  assert.equal(player.querySelector('[data-se-native-controls]'),null);
+});
+
+test('playing viewer chrome idles only away from hovered or focused controls and open popovers', async t => {
+  const {player,video} = addVideo();
+  let expire = () => {};
+  const timeout = win.setTimeout.bind(win);
+  t.mock.method(win,'setTimeout',(fn: () => void, ms: number) => {
+    if (ms === 2500) { expire = fn; return 0; }
+    return timeout(fn,ms);
+  });
+  start(); click('[data-site-enhancer-video-expand]'); await Promise.resolve();
+  const idle = () => player.hasAttribute('data-se-idle');
+  const bar = player.querySelector<HTMLElement>('.se-video-bar')!;
+  const pill = bar.querySelector<HTMLButtonElement>('[data-site-enhancer-video-speed]')!;
+  expire(); assert.ok(idle());
+  bar.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true}) as unknown as Event);
+  expire(); assert.equal(idle(),false);
+  video.dispatchEvent(new win.PointerEvent('pointermove',{bubbles:true}) as unknown as Event);
+  pill.focus(); expire(); assert.equal(idle(),false);
+  pill.click(); (document.activeElement as HTMLElement).blur(); expire(); assert.equal(idle(),false);
+  pill.click(); expire(); assert.ok(idle());
+  viewerKey('j'); assert.equal(idle(),false);
+  video.pause(); video.dispatchEvent(new win.Event('pause') as unknown as Event); expire();
+  assert.equal(idle(),false);
+});
+
 test('native video destinations respect mixed media order, quoted posts and explicit video links', () => {
   const article = document.querySelector('article')!;
   article.insertAdjacentHTML('beforeend', `<a href="/alice/status/123/photo/1"><img></a><video></video>
@@ -244,13 +420,16 @@ test('native video destinations respect mixed media order, quoted posts and expl
   assert.equal(nativeVideoUrl(linked), 'https://x.com/alice/status/123/video/3');
 });
 
-test('a denied fullscreen request releases playback priority and keeps the control usable', async () => {
+test('a denied fullscreen request falls back in place and can be reopened in fullscreen', async () => {
   const { player } = addVideo();
   const allow = player.requestFullscreen;
   player.requestFullscreen = async () => { throw new TypeError('Fullscreen denied'); };
   start();
   click('[data-site-enhancer-video-expand]');
   await Promise.resolve();
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
+  assert.ok(player.querySelector('.se-video-chrome'));
+  viewerKey('Escape');
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   player.requestFullscreen = allow;
   click('[data-site-enhancer-video-expand]');

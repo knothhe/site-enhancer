@@ -1,8 +1,7 @@
 import { PRIMARY as PRIMARY_COLUMN, PRIMARY_POST, POST, POST_LINK, TIMESTAMP, PLAYER, WEB, COLUMN_MAIN, focusedPost, isNativeRoute } from './x-dom.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
-import { installXImageViewer } from './x-image-viewer.ts';
-import { installXVideoViewer } from './x-video-viewer.ts';
+import { installXMedia } from './x-media.ts';
 import { DETAIL_PENDING_ATTR } from './x-video-gate.ts';
 import { installDetailHistory } from './x-detail-history.ts';
 import { resolveQuoteUrl } from './x-quote.ts';
@@ -224,8 +223,7 @@ export function installXColumns(options: {
   releaseDetail?: () => void;
 } = {}) {
   const root = document.documentElement;
-  const imageViewer = installXImageViewer();
-  const videoViewer = installXVideoViewer({
+  const media = installXMedia({
     nativeVideoUrl: video => nativeVideoUrl(video, selected),
     isPrimaryPost(video) {
       const doc = video.ownerDocument;
@@ -351,7 +349,7 @@ export function installXColumns(options: {
       doc.removeEventListener('click', click, true);
       doc.removeEventListener('keydown', openFocused, true);
       doc.removeEventListener('keydown', closeOnEscape);
-      videoViewer.detach(doc);
+      media.detach(doc);
     }
     frameDocuments.delete(target);
     for (const [url, entry] of readyFrames) if (entry.frame === target) readyFrames.delete(url);
@@ -369,7 +367,7 @@ export function installXColumns(options: {
     } catch { return false; }
   }
   function parkFrame() {
-    videoViewer.close();
+    media.close();
     stopFrameWatch();
     if (!frame) return;
     const entry = selected && readyFrames.get(selected);
@@ -377,7 +375,7 @@ export function installXColumns(options: {
       entry.scrollX = entry.doc.defaultView?.scrollX || entry.doc.documentElement.scrollLeft;
       entry.scrollY = entry.doc.defaultView?.scrollY || entry.doc.documentElement.scrollTop;
       frame.hidden = true;
-      videoViewer.pause(entry.doc);
+      media.pause(entry.doc);
       for (const audio of entry.doc.querySelectorAll<HTMLAudioElement>('audio')) {
         if (!audio.paused) audio.pause();
       }
@@ -393,7 +391,7 @@ export function installXColumns(options: {
     clearFrames();
     frame = undefined;
     selected = undefined;
-    videoViewer.setFeedPaused(false);
+    media.setFeedPaused(false);
     selectedArticle?.removeAttribute('data-site-enhancer-selected');
     selectedArticle = undefined;
     selectedOffset = undefined;
@@ -443,12 +441,12 @@ export function installXColumns(options: {
     if ((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData) return;
     const hasVideo = Boolean(article.querySelector(`${PLAYER}, video`));
     // Avoid hidden media-stream buffering competing with an actively playing video.
-    if (hasVideo && videoViewer.isPlaying()) return;
+    if (hasVideo && media.isPlaying()) return;
     hoverArticle = article;
     hoverTimer = setTimeout(() => {
       const url = detailUrl(postPermalink(article) ?? '', location.origin);
       if (!url || !selected || !panel || loadingFrame || !article.isConnected || readyFrames.has(url) || document.querySelector(X_OVERLAY_SELECTOR)) return;
-      if (hasVideo && videoViewer.isPlaying()) return;
+      if (hasVideo && media.isPlaying()) return;
       const current = makeFrame();
       current.hidden = true;
       hoverFrame = { url, frame: current };
@@ -504,7 +502,7 @@ export function installXColumns(options: {
     frame = undefined;
     selected = url;
     updateTitle();
-    videoViewer.setFeedPaused(true);
+    media.setFeedPaused(true);
     openLink.href = url;
     openLink.hidden = false;
     copyLinkButton.hidden = false;
@@ -569,7 +567,7 @@ export function installXColumns(options: {
               title.textContent = primary.querySelector('[data-testid="User-Name"]')?.textContent || t.title;
             }
             frameDocuments.set(current, doc);
-            videoViewer.attach(doc, current);
+            media.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
             while (readyFrames.size > 2) discardFrame(readyFrames.values().next().value!.frame);
             hidePrevious();
@@ -647,7 +645,7 @@ export function installXColumns(options: {
   }
   function mount() {
     if (panel || !document.body) return;
-    videoViewer.attach(document);
+    media.attach(document);
     panel = document.createElement('aside');
     panel.id = 'site-enhancer-columns';
     const current = panel;
@@ -899,11 +897,10 @@ export function installXColumns(options: {
     clearTimeout(followTimer);
     clearTimeout(copyLinkTimer);
     copyLinkTimer = undefined;
-    imageViewer.close();
-    if (!mediaEnhanced) videoViewer.remove();
+    if (!mediaEnhanced) media.remove();
     else {
-      videoViewer.close();
-      videoViewer.setFeedPaused(false);
+      media.close();
+      media.setFeedPaused(false);
     }
     navToggle?.remove();
     navToggle = undefined;
@@ -983,7 +980,7 @@ export function installXColumns(options: {
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (!target?.closest(PRIMARY_COLUMN) || !target.closest(POST)) return;
     if ((panel && active()) || mediaEnhanced) {
-      if (imageViewer.handleClick(event)) return;
+      if (media.handleClick(event)) return;
     }
     if (!panel || !active()) return;
     if (target.closest(PLAYER) || target.closest('button,[role="button"],input,textarea,select,video,[data-testid="videoComponent"],[contenteditable="true"]')) return;
@@ -1099,12 +1096,12 @@ export function installXColumns(options: {
   window.addEventListener('storage', storage);
   window.addEventListener('message', detailReady);
   return {
-    setEnabled(value: boolean) { enabled = value; videoViewer.setPlayback(value || mediaEnhanced); refresh(); },
+    setEnabled(value: boolean) { enabled = value; media.setPlayback(value || mediaEnhanced); refresh(); },
     setMediaEnhanced(value: boolean) {
       mediaEnhanced = value;
-      videoViewer.setPlayback(enabled || mediaEnhanced);
-      if (mediaEnhanced && document.body) videoViewer.attach(document);
-      else if (!enabled && !mediaEnhanced) { imageViewer.close(); videoViewer.remove(); }
+      media.setPlayback(enabled || mediaEnhanced);
+      if (mediaEnhanced && document.body) media.attach(document);
+      else if (!enabled && !mediaEnhanced) media.remove();
     },
     onNavigate() {
       // Dialog routes such as quote and compose keep the timeline underneath, so keep its detail too.
@@ -1117,10 +1114,10 @@ export function installXColumns(options: {
       mediaEnhanced = false;
       structureObserver.disconnect();
       if (structureFrame !== undefined) window.cancelAnimationFrame(structureFrame);
-      videoViewer.setPlayback(false);
+      media.setPlayback(false);
       langObserver.disconnect();
       unmount();
-      videoViewer.remove();
+      media.remove();
       sheet.remove();
       history.remove();
       document.removeEventListener('focusin', follow);

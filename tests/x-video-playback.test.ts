@@ -417,3 +417,24 @@ test('volume sync skips hidden cached documents and falls back to muted if brows
   assert.equal(mutedState, true, 'falls back to muted when unmute pauses playback');
   assert.equal(pausedState, false, 'resumes muted playback after fallback');
 });
+
+test('temporary 2× restores the chosen rate, including after another tab changes it, and skips GIFs', async () => {
+  const normal = addVideo(), gif = addVideo();
+  gif.player.dataset.testid = 'tweetGif';
+  const rules = start();
+  rules.setRate(normal.video, 1.5);
+  rules.holdRate(normal.video, true);
+  assert.equal(normal.video.playbackRate, 2);
+  assert.equal(localStorage.getItem('site-enhancer:x-video-rate'), '1.5');
+  localStorage.setItem('site-enhancer:x-video-rate', '1.75');
+  window.dispatchEvent(new win.StorageEvent('storage', { key: 'site-enhancer:x-video-rate' }) as unknown as Event);
+  assert.equal(normal.video.playbackRate, 2);
+  rules.holdRate(normal.video, false);
+  assert.equal(normal.video.playbackRate, 1.75);
+  await gif.video.play();
+  assert.equal(gif.video.playbackRate, 1);
+  rules.setRate(normal.video, 5);
+  assert.equal(normal.video.playbackRate, 4);
+  rules.setRate(normal.video, 0);
+  assert.equal(normal.video.playbackRate, .25);
+});

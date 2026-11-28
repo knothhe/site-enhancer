@@ -1,3 +1,5 @@
+import { createSpeedControl, SPEED_CSS, type SpeedControl } from './x-video-speed.ts';
+import { createMediaViewer } from './x-media-viewer.ts';
 import { WEB, PLAYER } from './x-dom.ts';
 import { resolveLocale } from './i18n.ts';
 import { installXVideoPlayback, isGifVideo } from './x-video-playback.ts';
@@ -8,44 +10,39 @@ const POST_PLAYER = `[data-testid="primaryColumn"] article ${PLAYER}, ${WEB} mai
 const MEDIA = `${PLAYER},video`;
 const EXPANDED = 'data-site-enhancer-video-expanded';
 const BUTTON = 'data-site-enhancer-video-expand';
-const SPEED_BUTTON = 'data-site-enhancer-video-speed';
-const SPEEDS = [1, 1.25, 1.5, 2, 0.75] as const;
-const CSS = `
+
+const CSS = SPEED_CSS + `
 ${PLAYER} video{object-fit:contain!important}
-[${BUTTON}],[${SPEED_BUTTON}]{position:absolute;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
+[${BUTTON}]{position:absolute;top:10px;z-index:10;display:flex;align-items:center;gap:6px;min-height:32px;padding:6px 10px;border:1px solid #ffffff35;border-radius:8px;background:#101318df;color:#fff;font:12px/1.4 system-ui;cursor:pointer;box-shadow:0 2px 8px #0003}
 [${BUTTON}]{right:10px}
-[${SPEED_BUTTON}]{left:10px;font-variant-numeric:tabular-nums;font-weight:600;padding:4px 8px;min-height:28px;opacity:.82;transition:opacity .15s,background .15s}
-[${SPEED_BUTTON}]:hover,[${SPEED_BUTTON}]:focus-visible{opacity:1;background:#303640}
 [${BUTTON}][data-compact]{padding:6px}
 [${BUTTON}][data-compact] span{display:none}
 [${BUTTON}]:hover{background:#303640}
-[${BUTTON}]:focus-visible,[${SPEED_BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}
+[${BUTTON}]:focus-visible{outline:2px solid #fff;outline-offset:3px}
 [${BUTTON}] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;pointer-events:none}
-${PLAYER}[${EXPANDED}]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:58px 24px 24px!important;box-sizing:border-box!important;border:0!important;border-radius:0!important;background:#101318!important;color:#fff!important;overflow:hidden!important}
+${PLAYER}[${EXPANDED}]{z-index:2147483647!important;position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;box-sizing:border-box!important;border:0!important;border-radius:0!important;background:#101318!important;color:#fff!important;overflow:hidden!important}
 ${PLAYER}[${EXPANDED}]::backdrop{background:#101318}
 ${PLAYER}[${EXPANDED}]>div:has(video){height:100%!important;max-height:100%!important}
 /* X uses a padding spacer inside its absolutely positioned player. */
 ${PLAYER}[${EXPANDED}]>div>div[style*="padding-bottom"]{display:none!important}
 ${PLAYER}[${EXPANDED}] video{object-fit:contain!important}
-${PLAYER}[${EXPANDED}] [${BUTTON}]{top:12px;right:24px;min-height:34px;padding:6px 10px}
-${PLAYER}[${EXPANDED}] [${SPEED_BUTTON}]{top:14px;left:24px;min-height:30px;opacity:1}
-${PLAYER}[${EXPANDED}] [${BUTTON}][data-compact] span{display:inline}
-@media(max-width:600px){${PLAYER}[${EXPANDED}]{padding:58px 8px 8px!important}${PLAYER}[${EXPANDED}] [${BUTTON}]{right:12px}${PLAYER}[${EXPANDED}] [${SPEED_BUTTON}]{left:12px}}
+${PLAYER}[${EXPANDED}] [${BUTTON}]{display:none!important}
 `;
 
 /** Keep X's actual player (including its MediaSource, controls and event handlers)
  * in place. Fullscreen lets caption extensions mount on the actual player. */
-export function installXVideoViewer(options: {
+export function installXMedia(options: {
   nativeVideoUrl?: (video: HTMLVideoElement) => string | undefined;
   isPrimaryPost?: (video: HTMLVideoElement) => boolean;
 } = {}) {
   const documents = new Map<Document, { dispose: () => void; frame?: HTMLIFrameElement }>();
   let feedPaused = false;
   let interruptedFeedVideo: HTMLVideoElement | undefined;
-  let expanded: { player: HTMLElement; close: () => void } | undefined;
+  let expanded: HTMLElement | undefined;
+  const speeds = new WeakMap<HTMLElement, SpeedControl>();
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
-    ? { native: '在 X 帖子中观看', expand: '全屏观看', close: '退出全屏 · Esc', speed: '播放倍速' }
-    : { native: 'Watch on X post', expand: 'Full screen', close: 'Exit full screen · Esc', speed: 'Playback speed' };
+    ? { native: '在 X 帖子中观看', expand: '全屏观看' }
+    : { native: 'Watch on X post', expand: 'Full screen' };
 
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
@@ -53,45 +50,24 @@ export function installXVideoViewer(options: {
   const playback = installXVideoPlayback({
     blocked,
     hidden: doc => doc !== document && blocked(doc),
-    expanded: () => expanded?.player,
+    expanded: () => expanded,
     isPrimaryPost: options.isPrimaryPost,
   });
-  function close() { expanded?.close(); }
-
-  function open(player: HTMLElement, button: HTMLButtonElement) {
-    close();
-    const doc = player.ownerDocument;
-    const focus = doc.activeElement as HTMLElement | null;
-    function restore() {
-      if (expanded?.close !== restore) return;
-      expanded = undefined;
-      doc.removeEventListener('fullscreenchange', onChange);
-      player.removeAttribute(EXPANDED);
-      setLabel(button, labels().expand);
-      button.setAttribute('aria-expanded', 'false');
-      if (doc.fullscreenElement === player) void doc.exitFullscreen().catch(() => {});
-      if (blocked(doc)) playback.pause(doc);
-      if (focus?.isConnected) focus.focus({ preventScroll: true });
-    }
-    function onChange() {
-      if (doc.fullscreenElement !== player) restore();
-    }
-    expanded = { player, close: restore };
-    doc.addEventListener('fullscreenchange', onChange);
-    void player.requestFullscreen().then(() => {
-      if (expanded?.close !== restore) {
-        if (doc.fullscreenElement === player && expanded?.player !== player) void doc.exitFullscreen().catch(() => {});
-        return;
+  const viewer = createMediaViewer({
+    speed: player => speeds.get(player),
+    nativeVideoUrl: options.nativeVideoUrl,
+    toggleMute: playback.toggleMute,
+    setVolume: playback.setVolume,
+    activate(player) {
+      expanded = player;
+      if (player) {
+        documents.forEach((_entry, doc) => playback.pause(doc));
+        const video = player.querySelector('video');
+        if (video) playback.enter(video);
       }
-      player.setAttribute(EXPANDED, '');
-      setLabel(button, labels().close);
-      button.setAttribute('aria-expanded', 'true');
-      documents.forEach((_entry, other) => playback.pause(other));
-      const video = player.querySelector('video');
-      if (video?.paused) void video.play()?.catch(() => {});
-      button.focus({ preventScroll: true });
-    }, restore);
-  }
+    },
+  });
+  const close = viewer.close;
 
   function setLabel(button: HTMLButtonElement, label: string) {
     button.querySelector('span')!.textContent = label;
@@ -105,40 +81,38 @@ export function installXVideoViewer(options: {
     style.id = 'site-enhancer-video-style';
     style.textContent = CSS;
     (doc.head ?? doc.documentElement).append(style);
-    const players = new Map<HTMLElement, { button: HTMLButtonElement; speed?: HTMLButtonElement; video: HTMLVideoElement }>();
-    function syncSpeedLabel(button: HTMLButtonElement, video: HTMLVideoElement) {
-      const rate = video.playbackRate || 1;
-      button.textContent = `${rate}x`;
-      button.title = `${labels().speed}: ${rate}x`;
-      button.setAttribute('aria-label', button.title);
-    }
+    const players = new Map<HTMLElement, { button: HTMLButtonElement; speed?: SpeedControl; video: HTMLVideoElement }>();
     function syncPlayer(player: HTMLElement) {
       const existing = players.get(player);
       const video = player.isConnected && player.ownerDocument === doc && player.matches(POST_PLAYER)
         ? player.querySelector<HTMLVideoElement>('video')
         : null;
       if (!video) {
-        if (expanded?.player === player) close();
-        players.delete(player);
+        if (expanded === player) close();
+        speeds.delete(player); players.delete(player);
         existing?.button.remove();
         existing?.speed?.remove();
         return;
       }
       if (existing) {
+        const changedVideo = existing.video !== video;
         existing.video = video;
         const width = player.getBoundingClientRect().width;
         existing.button.toggleAttribute('data-compact', width > 0 && width < 260);
         if (!player.contains(existing.button)) player.append(existing.button);
-        if (existing.speed) {
-          if (isGifVideo(video)) { existing.speed.remove(); existing.speed = undefined; }
-          else {
-            syncSpeedLabel(existing.speed, video);
-            if (!player.contains(existing.speed)) player.append(existing.speed);
-          }
+        if (isGifVideo(video)) {
+          existing.speed?.remove(); existing.speed = undefined; speeds.delete(player);
+        } else {
+          existing.speed ??= createSpeedControl(player, playback);
+          speeds.set(player, existing.speed); existing.speed.sync();
+          if (!player.contains(existing.speed.root)) player.append(existing.speed.root);
+        }
+        if (expanded === player) {
+          viewer.refreshControls(player);
+          if (changedVideo) playback.enter(video);
         }
         return;
       }
-      if (!frame && typeof player.requestFullscreen !== 'function') return;
       const button = doc.createElement('button');
       button.type = 'button';
       button.setAttribute(BUTTON, '');
@@ -148,19 +122,13 @@ export function installXVideoViewer(options: {
       const icon = frame ? 'M14 3h7v7m0-7L10 14M10 5H4v15h15v-6' : 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5';
       button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icon}"/></svg><span></span>`;
       setLabel(button, frame ? labels().native : labels().expand);
-      let speed: HTMLButtonElement | undefined;
-      if (!isGifVideo(video)) {
-        speed = doc.createElement('button');
-        speed.type = 'button';
-        speed.setAttribute(SPEED_BUTTON, '');
-        syncSpeedLabel(speed, video);
-      }
-      players.set(player, { button, speed, video });
       player.append(button);
-      if (speed) player.append(speed);
+      const speed = isGifVideo(video) ? undefined : createSpeedControl(player, playback);
+      if (speed) speeds.set(player, speed);
+      players.set(player, { button, speed, video });
     }
     function syncChanges(records: MutationRecord[]) {
-      if (expanded?.player.ownerDocument === doc && !expanded.player.isConnected) close();
+      if (expanded?.ownerDocument === doc && !expanded.isConnected) close();
       const changed = new Set<HTMLElement>();
       let elementsRemoved = false;
       function collectMedia(element: HTMLElement) {
@@ -188,7 +156,7 @@ export function installXVideoViewer(options: {
         for (const node of addedNodes) {
           if (node.nodeType !== 1) continue;
           const element = node as HTMLElement;
-          if (element.hasAttribute(BUTTON) || element.hasAttribute(SPEED_BUTTON)) continue;
+          if (element.hasAttribute(BUTTON) || element.classList.contains('se-speed')) continue;
           if (element.matches(MEDIA)) collectMedia(element);
           if (element.firstElementChild) element.querySelectorAll<HTMLElement>(MEDIA).forEach(collectMedia);
         }
@@ -203,19 +171,6 @@ export function installXVideoViewer(options: {
     }
     function click(event: MouseEvent) {
       const target = event.target as Element | null;
-      const speedBtn = target?.closest?.<HTMLButtonElement>(`[${SPEED_BUTTON}]`);
-      if (speedBtn && event.button === 0) {
-        const player = speedBtn.closest<HTMLElement>(PLAYER);
-        const entry = player && players.get(player);
-        if (entry && entry.speed === speedBtn) {
-          event.preventDefault(); event.stopImmediatePropagation();
-          const currentIdx = SPEEDS.indexOf(entry.video.playbackRate as typeof SPEEDS[number]);
-          const next = SPEEDS[(currentIdx + 1) % SPEEDS.length];
-          entry.video.playbackRate = next;
-          syncSpeedLabel(speedBtn, entry.video);
-        }
-        return;
-      }
       const button = target?.closest?.<HTMLButtonElement>(`[${BUTTON}]`);
       if (!button || event.button !== 0) return;
       const player = button.closest<HTMLElement>(PLAYER);
@@ -227,11 +182,11 @@ export function installXVideoViewer(options: {
         if (url) window.location.assign(url);
         return;
       }
-      if (expanded?.player === player) close(); else open(player, button);
+      if (expanded === player) close(); else viewer.openVideo(player, button);
     }
     const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {
-      if (expanded?.player.ownerDocument === doc) close();
+      if (expanded?.ownerDocument === doc) close();
       observer.disconnect();
       doc.removeEventListener('click', click, true);
       players.forEach(({ button, speed }) => { button.remove(); speed?.remove(); });
@@ -246,6 +201,7 @@ export function installXVideoViewer(options: {
     playback.attach(doc);
   }
   return {
+    handleClick: viewer.handleClick,
     attach,
     /** Single playback and the shared volume also apply while the window is too narrow for three columns. */
     setPlayback(value: boolean) {
@@ -263,7 +219,7 @@ export function installXVideoViewer(options: {
     setFeedPaused(value: boolean) {
       feedPaused = value;
       if (value) {
-        if (expanded?.player.ownerDocument === document) close();
+        if (expanded?.ownerDocument === document) close();
         const active = Array.from(document.querySelectorAll<HTMLVideoElement>('video'))
           .find(video => !video.paused && !video.ended);
         if (active) interruptedFeedVideo = active;

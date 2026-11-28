@@ -1,9 +1,53 @@
-import { POST, PHOTO, PHOTO_IMAGE } from './x-dom.ts';
+import { mountVideoBar, VIDEO_BAR_CSS } from './x-video-bar.ts';
+import { isGifVideo } from './x-video-playback.ts';
+import { POST, PHOTO, PHOTO_IMAGE, PLAYER } from './x-dom.ts';
 import { createImageMotion } from './x-image-motion.ts';
 import { resolveLocale } from './i18n.ts';
 import { imageToPng } from './image-clipboard.ts';
+import type { SpeedControl } from './x-video-speed.ts';
 
 type Photo = { src: string; alt: string; preview?: string };
+type MediaItem = { image: Photo; element: HTMLImageElement } | { player: HTMLElement; element: HTMLVideoElement };
+const mediaTile = (img: Element) => img.closest('a[href*="/photo/"],div:has(> a[href*="/photo/"])');
+function postMedia(source: Element): MediaItem[] {
+  const owner = (el: Element) => el.closest('[role="link"]:not(a),' + POST) ?? el.closest('article');
+  const group = owner(source);
+  if (!group) return [];
+  const items: MediaItem[] = [];
+  for (const node of group.querySelectorAll(PHOTO_IMAGE + ',video')) {
+    if (owner(node) !== group) continue;
+    const player = node.closest<HTMLElement>(PLAYER);
+    if (node.tagName === 'VIDEO') {
+      if (player) items.push({ player, element: node as HTMLVideoElement });
+      continue;
+    }
+    if (player || (!node.closest('[data-testid="tweetPhoto"]') && !mediaTile(node))) continue;
+    const img = node as HTMLImageElement;
+    const src = img.currentSrc || img.src;
+    if (!src || !URL.canParse(src, img.baseURI)) continue;
+    const url = new URL(src, img.baseURI);
+    if (url.protocol !== 'https:' || url.hostname !== 'pbs.twimg.com' || !url.pathname.startsWith('/media/')) continue;
+    url.searchParams.set('name', 'orig');
+    items.push({ element: img, image: { src: url.href, alt: img.alt, preview: img.complete && img.naturalWidth ? src : undefined } });
+  }
+  return items;
+}
+// A display-only still lets the outgoing surface fade above the incoming top layer.
+function transitionStill(source?: HTMLVideoElement | HTMLImageElement) {
+  if (!source || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const w = 'videoWidth' in source ? source.videoWidth : source.naturalWidth;
+  const h = 'videoHeight' in source ? source.videoHeight : source.naturalHeight;
+  const box = source.getBoundingClientRect();
+  if (!w || !h || !box.width || !box.height) return;
+  const frame = document.createElement('canvas');
+  frame.width = Math.round(box.width); frame.height = Math.round(box.height);
+  const ctx = frame.getContext('2d');
+  if (!ctx) return;
+  const scale = Math.min(frame.width/w,frame.height/h);
+  ctx.drawImage(source,(frame.width-w*scale)/2,(frame.height-h*scale)/2,w*scale,h*scale);
+  frame.style.cssText = `position:fixed;pointer-events:none;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;z-index:10`;
+  return frame;
+}
 const ICONS = {
   close: 'M6 6l12 12M18 6L6 18',
   previous: 'M15 5l-7 7 7 7', next: 'M9 5l7 7-7 7',
@@ -17,60 +61,99 @@ const ICONS = {
   rotate: 'M21 12a9 9 0 1 1-3-6.7L21 8m0-5v5h-5',
 };
 /** One top-level viewer shared by timeline and same-origin detail documents. */
-export function installXImageViewer() {
+export function createMediaViewer(options: {
+  speed(player: HTMLElement): SpeedControl | undefined;
+  activate(player?: HTMLElement): void;
+  setVolume(video: HTMLVideoElement, level: number): void;
+  toggleMute(video: HTMLVideoElement): void;
+  nativeVideoUrl?: (video: HTMLVideoElement) => string | undefined;
+}) {
   let dialog: HTMLDialogElement | undefined;
   let restoreFocus: HTMLElement | undefined;
+  let refreshControls: ((target: HTMLElement) => void) | undefined;
   let disposeOpenView: (() => void) | undefined;
   function close() {
     disposeOpenView?.();
     disposeOpenView = undefined;
+    refreshControls = undefined;
     dialog?.remove();
     dialog = undefined;
     if (restoreFocus?.isConnected) restoreFocus.focus({ preventScroll: true });
     restoreFocus = undefined;
   }
-  function open(photos: Photo[], index: number, trigger: HTMLElement) {
+  function open(items: MediaItem[], index: number, trigger: HTMLElement) {
     close();
     restoreFocus = trigger;
+    const scroll = [window.scrollX, window.scrollY] as const;
+    function imageAt(i: number) {
+      const item = items[i];
+      return item && 'image' in item ? item.image : undefined;
+    }
+    const mixed = items.some(item => 'image' in item) && items.some(item => 'player' in item);
+    // The Fullscreen API rejects HTMLDialogElement. Fullscreen its container and
+    // show the dialog non-modally inside it when coming from a fullscreen player.
+    const host = document.createElement('div');
+    const videoChrome = document.createElement('div');
+    videoChrome.tabIndex = -1;
+    videoChrome.className = 'se-media-controls se-video-chrome';
+    videoChrome.addEventListener('click', event => event.stopPropagation());
+    let player: HTMLElement | undefined;
+    let videoBar: ReturnType<typeof mountVideoBar> | undefined;
+    let speed: SpeedControl | undefined;
+    let fullscreen = false;
+    let switching = 0, sequence = 0;
+    let lifted: HTMLElement | undefined;
+    const overflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    const owned = new Set<Element>([host]);
     const zh = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
     const current = document.createElement('dialog');
     dialog = current;
-    current.id = 'site-enhancer-image-viewer';
-    current.setAttribute('aria-label', zh ? '图片查看' : 'Image viewer');
+    current.id = 'site-enhancer-media-viewer';
+    current.className = 'se-media-controls';
+    current.setAttribute('aria-label', zh ? '媒体查看' : 'Media viewer');
     const style = document.createElement('style');
-    style.textContent = `
-#site-enhancer-image-viewer{position:fixed;inset:0;margin:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;padding:16px;background:#101318;color:#fff;box-sizing:border-box;font:14px/1.5 system-ui;overflow:hidden}
-#site-enhancer-image-viewer[open]{display:flex;flex-direction:column}
-#site-enhancer-image-viewer::backdrop{background:#000b}
-#site-enhancer-image-viewer header{display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
-#site-enhancer-image-viewer button{font:inherit;background:#ffffff15;color:#fff;border:0;border-radius:8px;padding:9px;cursor:pointer;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
-#site-enhancer-image-viewer button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
-#site-enhancer-image-viewer button:not(:disabled):hover{background:#ffffff29}
-#site-enhancer-image-viewer button:disabled{opacity:.35;cursor:default}
-#site-enhancer-image-viewer button:focus-visible{outline:2px solid #fff;outline-offset:2px}
-#site-enhancer-image-viewer .se-image-count{margin-right:auto}
-#site-enhancer-image-viewer .se-image-stage{position:relative;width:100%;height:100%;box-sizing:border-box;overflow:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#59616c #101318;scrollbar-width:auto;touch-action:none;user-select:none}
-#site-enhancer-image-viewer .se-image-stage::-webkit-scrollbar{width:12px;height:12px;background:#101318}
-#site-enhancer-image-viewer .se-image-stage::-webkit-scrollbar-thumb{background:#59616c;border:3px solid #101318;border-radius:8px}
-#site-enhancer-image-viewer .se-image-stage::-webkit-scrollbar-track,#site-enhancer-image-viewer .se-image-stage::-webkit-scrollbar-corner{background:#101318}
-#site-enhancer-image-viewer .se-image-notice{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);max-width:calc(100% - 144px);display:flex;align-items:center;gap:8px;background:#1c222bf2;padding:8px 12px;border-radius:10px;z-index:2}
-#site-enhancer-image-viewer .se-image-viewport{position:relative;flex:1;min-height:0;margin-top:16px}
-#site-enhancer-image-viewer .se-image-motion{position:absolute;overflow:hidden;pointer-events:none;z-index:1}
-#site-enhancer-image-viewer .se-image-slide{position:absolute;inset:0;will-change:transform}
-#site-enhancer-image-viewer .se-image-side{z-index:2;position:absolute;top:50%;transform:translateY(-50%);width:48px;height:56px;background:#101318d9;box-shadow:0 2px 12px #0004}
-#site-enhancer-image-viewer .se-image-side[data-direction="previous"]{left:12px}
-#site-enhancer-image-viewer .se-image-side[data-direction="next"]{right:28px}
-#site-enhancer-image-viewer .se-image-shortcuts{position:absolute;bottom:44px;left:16px;right:16px;z-index:3;max-height:25vh;overflow:auto;background:#1c222b;border-radius:8px;padding:12px;margin-top:8px;line-height:1.8;font-size:13px;color:#d4d9df}
-#site-enhancer-image-viewer .se-image-canvas{display:flex;align-items:center;justify-content:center;min-width:100%;min-height:100%}
-#site-enhancer-image-viewer img{display:block;flex:none;max-width:none;max-height:none;object-fit:contain;user-select:none;-webkit-user-drag:none;pointer-events:none}
-#site-enhancer-image-viewer .se-image-stage[data-pannable]{cursor:grab}
-#site-enhancer-image-viewer .se-image-stage[data-dragging]{cursor:grabbing}
-#site-enhancer-image-viewer .se-image-help{font-size:12px;color:#aeb6bf;margin:10px 0 0;flex-shrink:0}
-#site-enhancer-image-viewer .se-image-feedback{margin:0}
-#site-enhancer-image-viewer .se-image-feedback:empty{display:none}
-#site-enhancer-image-viewer .se-image-scale{width:56px;flex-shrink:0;text-align:center;font-variant-numeric:tabular-nums}
-#site-enhancer-image-viewer .se-image-retry{align-self:center;margin:8px}
-#site-enhancer-image-viewer [hidden]{display:none!important}
+    style.textContent = VIDEO_BAR_CSS + `
+#site-enhancer-media-viewer{position:fixed;inset:0;margin:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;padding:16px;background:#101318;color:#fff;box-sizing:border-box;font:14px/1.5 system-ui;overflow:hidden}
+#site-enhancer-media-viewer[open]{display:flex;flex-direction:column}
+#site-enhancer-media-viewer::backdrop{background:#000b}
+.se-media-controls header{display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap}
+.se-media-controls button{font:inherit;background:#ffffff15;color:#fff;border:0;border-radius:8px;padding:9px;cursor:pointer;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.se-media-controls button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+.se-media-controls button:not(:disabled):hover{background:#ffffff29}
+.se-media-controls button:disabled{opacity:.35;cursor:default}
+.se-media-controls button:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.se-media-controls .se-image-count{display:flex;align-items:center;gap:4px;white-space:nowrap;margin-right:auto;font-variant-numeric:tabular-nums}
+.se-image-count svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8}
+.se-image-tools{display:flex;align-items:center;gap:8px;overflow-x:auto;scrollbar-width:none}
+.se-media-controls .se-image-stage{position:relative;width:100%;height:100%;box-sizing:border-box;overflow:scroll;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-color:#59616c #101318;scrollbar-width:auto;touch-action:none;user-select:none}
+.se-media-controls .se-image-stage::-webkit-scrollbar{width:12px;height:12px;background:#101318}
+.se-media-controls .se-image-stage::-webkit-scrollbar-thumb{background:#59616c;border:3px solid #101318;border-radius:8px}
+.se-media-controls .se-image-stage::-webkit-scrollbar-track,.se-media-controls .se-image-stage::-webkit-scrollbar-corner{background:#101318}
+.se-media-controls .se-image-notice{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);max-width:calc(100% - 144px);display:flex;align-items:center;gap:8px;background:#1c222bf2;padding:8px 12px;border-radius:10px;z-index:2}
+.se-media-controls .se-image-viewport{position:relative;flex:1;min-height:0;margin-top:16px}
+.se-media-controls .se-image-motion{position:absolute;overflow:hidden;pointer-events:none;z-index:1}
+.se-media-controls .se-image-slide{position:absolute;inset:0;will-change:transform}
+.se-media-controls .se-image-side{z-index:2;position:absolute;top:50%;transform:translateY(-50%);width:48px;height:56px;background:#101318d9;box-shadow:0 2px 12px #0004}
+.se-media-controls .se-image-side[data-direction="previous"]{left:12px}
+.se-media-controls .se-image-side[data-direction="next"]{right:28px}
+.se-media-controls .se-image-shortcuts{position:absolute;bottom:44px;left:16px;right:16px;z-index:3;max-height:25vh;overflow:auto;background:#1c222b;border-radius:8px;padding:12px;margin-top:8px;line-height:1.8;font-size:13px;color:#d4d9df}
+.se-media-controls .se-image-canvas{display:flex;align-items:center;justify-content:center;min-width:100%;min-height:100%}
+.se-media-controls img{display:block;flex:none;max-width:none;max-height:none;object-fit:contain;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.se-media-controls .se-image-stage[data-pannable]{cursor:grab}
+.se-media-controls .se-image-stage[data-dragging]{cursor:grabbing}
+.se-media-controls .se-image-help{font-size:12px;color:#aeb6bf;margin:10px 0 0;flex-shrink:0}
+.se-media-controls .se-image-feedback{margin:0}
+.se-media-controls .se-image-feedback:empty{display:none}
+.se-media-controls .se-image-scale{width:56px;flex-shrink:0;text-align:center;font-variant-numeric:tabular-nums}
+.se-media-controls .se-image-retry{align-self:center;margin:8px}
+.se-media-controls [hidden]{display:none!important}
+.se-video-chrome{position:absolute;inset:0;pointer-events:none;outline:0;z-index:12;color:white;font:14px/1.5 system-ui}
+.se-video-chrome header{position:absolute;inset:16px 16px auto;pointer-events:auto}
+.se-video-chrome :is(button,.se-image-shortcuts,.se-speed){pointer-events:auto}
+.se-media-controls .se-speed-steps button{width:32px;height:32px}
+.se-media-controls .se-speed [data-site-enhancer-video-speed]{border-radius:18px}
+.se-media-controls .se-speed :is([data-changed],[aria-checked=true]){background:var(--se-x-accent,#1d9bf0)}
 `;
     const toolbar = document.createElement('header');
     const count = document.createElement('span');
@@ -117,7 +200,7 @@ export function installXImageViewer() {
       const candidate = document.createElement('img');
       candidate.draggable = false; candidate.hidden = true;
       candidate.decoding = 'async'; candidate.fetchPriority = priority;
-      candidate.alt = photos[target].alt;
+      candidate.alt = imageAt(target)!.alt;
       let canceled = false;
       let decoding = false;
       function detach() {
@@ -148,12 +231,12 @@ export function installXImageViewer() {
       requests.set(target, entry);
       candidate.addEventListener('load', onLoad);
       candidate.addEventListener('error', fail);
-      candidate.src = photos[target].src;
+      candidate.src = imageAt(target)!.src;
       return entry;
     }
     function warmNeighbors(center: number) {
       for (const target of [center + 1, center - 1]) {
-        if (target >= 0 && target < photos.length && !decoded.has(target) && !requests.has(target)) requestImage(target, 'low');
+        if (target >= 0 && imageAt(target) && !decoded.has(target) && !requests.has(target)) requestImage(target, 'low');
       }
     }
     const help = document.createElement('p');
@@ -166,6 +249,7 @@ export function installXImageViewer() {
     shortcuts.textContent = zh
       ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；C 复制图片；E 下载原图；T 旋转 90°；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
       : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; C: copy image; E: download original; T: rotate 90°; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
+    shortcuts.textContent += zh ? ' 视频：空格 / K 播放或暂停，J / L 快退或快进 5 秒（单项也可用 ← / →），M 静音，< / > 调速，按住 Shift+> 临时 2×。无法平移时 ↑ / ↓ 切换媒体。' : ' Video: Space / K play or pause, J / L seek 5 seconds (also ← / → for a single item), M mute, < / > speed, hold Shift+> for 2×. ↑ / ↓ browse when the image fits.';
     const scaleLabel = document.createElement('span');
     scaleLabel.className = 'se-image-scale';
     let scale = 1;
@@ -241,16 +325,14 @@ export function installXImageViewer() {
       return result;
     }
     function navigate(value: number, fromSwipe = false) {
-      const nextIndex = Math.max(0, Math.min(photos.length - 1, value));
+      const nextIndex = Math.max(0, Math.min(items.length - 1, value));
       if (nextIndex !== index) show(nextIndex, fromSwipe);
     }
-    const previous = button(zh ? '上一张' : 'Previous', () => navigate(index - 1), 'previous', 'ArrowLeft PageUp');
-    const next = button(zh ? '下一张' : 'Next', () => navigate(index + 1), 'next', 'ArrowRight PageDown');
-    const sidePrevious = button(zh ? '上一张' : 'Previous', () => navigate(index - 1), 'previous', 'ArrowLeft PageUp');
-    const sideNext = button(zh ? '下一张' : 'Next', () => navigate(index + 1), 'next', 'ArrowRight PageDown');
+    const sidePrevious = button(zh ? '上一项' : 'Previous', () => navigate(index - 1), 'previous', 'ArrowLeft PageUp');
+    const sideNext = button(zh ? '下一项' : 'Next', () => navigate(index + 1), 'next', 'ArrowRight PageDown');
     for (const [control, direction] of [[sidePrevious, 'previous'], [sideNext, 'next']] as const) {
       control.className = 'se-image-side'; control.dataset.direction = direction;
-      control.hidden = photos.length < 2;
+      control.hidden = items.length < 2;
     }
     const retry = button(zh ? '重试' : 'Retry', () => show(index), 'retry', 'R');
     retry.className = 'se-image-retry';
@@ -277,7 +359,7 @@ export function installXImageViewer() {
       download.disabled = true;
       copyStatus.textContent = zh ? '正在下载原图…' : 'Downloading image…';
       try {
-        const src = photos[displayedIndex].src;
+        const src = imageAt(displayedIndex)!.src;
         const response = await fetch(src, { credentials: 'omit' });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
@@ -305,7 +387,7 @@ export function installXImageViewer() {
       const timeout = setTimeout(() => controller.abort(), 30_000);
       try {
         // Start the clipboard write within the user gesture, before fetching/encoding.
-        const png = imageToPng(photos[displayedIndex].src, controller.signal);
+        const png = imageToPng(imageAt(displayedIndex)!.src, controller.signal);
         // Observe rejection even if ClipboardItem construction or write fails synchronously.
         void png.catch(() => {});
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
@@ -328,17 +410,129 @@ export function installXImageViewer() {
     const helpButton = button(zh ? '快捷键' : 'Keyboard shortcuts', toggleHelp, 'help', '?');
     helpButton.setAttribute('aria-expanded', 'false');
     helpButton.setAttribute('aria-controls', shortcuts.id);
+    function releasePlayer() {
+      if (lifted) {
+        if (lifted.isConnected) lifted.hidePopover();
+        lifted.removeAttribute('popover');
+        lifted = undefined;
+      }
+      if (!player) return;
+      releaseSpeed();
+      videoBar?.remove(); videoBar = undefined;
+      player.querySelector('video')?.pause();
+      if (speed) {
+        speed.close(); player.append(speed.root); speed = undefined;
+      }
+      player.removeAttribute('data-site-enhancer-video-expanded');
+      player.querySelector('[data-site-enhancer-video-expand]')?.setAttribute('aria-expanded','false');
+      player = undefined;
+    }
+    function fullscreenChange() {
+      if (!switching && fullscreen && document.fullscreenElement !== (player ?? host)) close();
+    }
+    async function exitOwned() {
+      while (document.fullscreenElement && owned.has(document.fullscreenElement)) {
+        const before = document.fullscreenElement;
+        try { await document.exitFullscreen(); } catch { break; }
+        if (document.fullscreenElement === before) break;
+      }
+    }
+    refreshControls = target => {
+      if (target !== player) return;
+      if (videoChrome.parentElement !== target) target.append(videoChrome);
+      speed = options.speed(target);
+      const video = target.querySelector('video');
+      if (video && (video !== videoBar?.video || isGifVideo(video) !== videoBar.gif)) {
+        videoBar?.remove();
+        videoBar = mountVideoBar(target,videoChrome,video,zh,options,close);
+      }
+      videoBar?.mountSpeed(speed);
+    };
+    function present(nextPlayer?: HTMLElement) {
+      const outgoing = player?.querySelector('video') ?? (loaded ? img : preview);
+      const still = generation > 1 ? transitionStill(outgoing) : undefined;
+      const wantsFullscreen = nextPlayer || fullscreen || switching || document.fullscreenElement;
+      const token = switching = ++sequence;
+      const destination = nextPlayer ?? host;
+      owned.add(destination);
+      let request: Promise<void> | undefined;
+      if (wantsFullscreen && document.fullscreenElement !== destination) {
+        try { request = destination.requestFullscreen?.(); }
+        catch { /* Use the modal or fixed player. */ }
+      }
+      releasePlayer();
+      player = nextPlayer;
+      // While an image in a mixed post is open, refuse X's attempts to restart
+      // the video we just paused, using the existing single-playback gate.
+      options.activate(player ?? (mixed ? host : undefined));
+      for (const tool of [zoomOut,scaleLabel,zoomIn,fit,actual,rotate,copy,download]) tool.hidden = !!player;
+      if (player) {
+        if (current.open) current.close();
+        player.setAttribute('data-site-enhancer-video-expanded','');
+        player.querySelector('[data-site-enhancer-video-expand]')?.setAttribute('aria-expanded','true');
+        videoChrome.append(toolbar, sidePrevious, sideNext, shortcuts);
+        refreshControls?.(player);
+        videoChrome.focus({ preventScroll:true });
+      } else {
+        current.prepend(toolbar); current.append(sidePrevious,sideNext,shortcuts);
+        videoChrome.remove();
+        if (!current.open) {
+          if (request || document.fullscreenElement === host) current.show();
+          else current.showModal();
+        }
+      }
+      if (still?.animate) {
+        (nextPlayer ?? current).append(still);
+        const fade = still.animate([{ opacity:1 },{ opacity:0 }],120);
+        void fade.finished.finally(() => still.remove()).catch(() => {});
+      } else if (generation > 1 && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        // A video can still be buffering with no frame available to snapshot.
+        (nextPlayer ?? viewport).animate?.([{ opacity: 0 }, { opacity: 1 }], 120);
+      }
+      function fallback() {
+        // Transformed timeline ancestors can clip a fixed player. Lift it in place.
+        if (player && !player.hasAttribute('popover') && player.showPopover) {
+          player.setAttribute('popover','manual');
+          try { player.showPopover(); lifted = player; } catch { player.removeAttribute('popover'); }
+        } else if (!player) { current.close(); current.showModal(); }
+      }
+      if (!request) {
+        switching = 0; fullscreen = document.fullscreenElement === destination;
+        if (!fullscreen && nextPlayer) fallback();
+        return;
+      }
+      void request.then(() => {
+        if (disposed) { if (!dialog) void exitOwned(); return; }
+        if (token !== switching) return;
+        switching = 0; fullscreen = document.fullscreenElement === destination;
+      }, async () => {
+        if (disposed || token !== switching) return;
+        fullscreen = false;
+        await exitOwned();
+        if (disposed || token !== switching) return;
+        switching = 0;
+        fallback();
+      });
+    }
     function show(value: number, fromSwipe = false) {
       copyController?.abort(); copyController = undefined;
       copy.disabled = true; download.disabled = true; rotate.disabled = true; copyStatus.textContent = '';
       if (!fromSwipe) stopSwipe();
       clearPreview();
-      index = Math.max(0, Math.min(photos.length - 1, value));
+      index = Math.max(0, Math.min(items.length - 1, value));
       const request = ++generation;
-      if (!loaded && photos[index].preview) {
+      const item = items[index];
+      const nextPlayer = 'player' in item ? item.player : undefined;
+      if ('player' in item && item.player.ownerDocument !== document) {
+        const url = options.nativeVideoUrl?.(item.element);
+        if (url) window.location.assign(url);
+        return;
+      }
+      if (request === 1 || player !== nextPlayer) present(nextPlayer);
+      if (!loaded && imageAt(index)?.preview) {
         preview = document.createElement('img');
-        preview.src = photos[index].preview!;
-        preview.alt = photos[index].alt;
+        preview.src = imageAt(index)!.preview!;
+        preview.alt = imageAt(index)!.alt;
         preview.draggable = false;
         preview.className = 'se-image-preview';
         preview.style.cssText = 'position:absolute;inset:0;width:calc(100% - 12px);height:calc(100% - 12px);object-fit:contain;pointer-events:none';
@@ -348,9 +542,18 @@ export function installXImageViewer() {
       clearTimeout(noticeTimer);
       endDrag();
       notice.hidden = true; retry.hidden = true;
-      count.textContent = `${index + 1} / ${photos.length}`;
-      previous.disabled = sidePrevious.disabled = index === 0;
-      next.disabled = sideNext.disabled = index === photos.length - 1;
+      count.textContent = `${index + 1} / ${items.length}`;
+      if (mixed) {
+        const path = nextPlayer ? 'M7 4l13 8-13 8z' : 'M3 4h18v16H3zM4 17l5-6 4 4 3-3 4 5M15 8h1';
+        count.insertAdjacentHTML('afterbegin', `<svg aria-hidden="true" viewBox="0 0 24 24"><path d="${path}"/></svg>`);
+        count.setAttribute('aria-label', (nextPlayer ? (zh ? '视频' : 'Video') : (zh ? '图片' : 'Image')) + ' ' + count.textContent);
+      }
+      sidePrevious.disabled = index === 0;
+      sideNext.disabled = index === items.length - 1;
+      if (nextPlayer) {
+        loaded = false; displayedIndex = -1; canvas.replaceChildren();
+        current.removeAttribute('aria-busy'); return;
+      }
       current.setAttribute('aria-busy', 'true');
       // Returning to the still-visible image cancels the pending switch without resetting its view.
       if (displayedIndex === index) {
@@ -453,10 +656,10 @@ export function installXImageViewer() {
       swipeLocked = true;
       const direction = swipeDistance > 0 ? 1 : -1;
       const target = index + direction;
-      if (Math.abs(swipeDistance) < 64 || target < 0 || target >= photos.length) {
+      if (Math.abs(swipeDistance) < 64 || target < 0 || target >= items.length) {
         motion.rebound(); return;
       }
-      if (!decoded.has(target) && motion.active) {
+      if (imageAt(target) && !decoded.has(target) && motion.active) {
         requestImage(target, 'high');
         motion.rebound(() => navigate(target));
       } else navigate(target, true);
@@ -500,11 +703,11 @@ export function installXImageViewer() {
       previousDelta = delta;
       swipeDistance += delta;
       const direction = swipeDistance > 0 ? 1 : -1;
-      if (loaded) motion.follow(img, decoded.get(index + direction), direction, swipeDistance);
+      if (loaded && (!items[index + direction] || imageAt(index + direction))) motion.follow(img, decoded.get(index + direction), direction, swipeDistance);
       clearTimeout(swipeTimer);
       // Commit a clear swipe immediately, without waiting for finger-up or OS inertia.
       // Short gestures can still reverse or rebound before crossing this threshold.
-      if (Math.abs(swipeDistance) >= 96 && index + direction >= 0 && index + direction < photos.length) {
+      if (Math.abs(swipeDistance) >= 96 && index + direction >= 0 && index + direction < items.length) {
         finishSwipe(); return;
       }
       // Wheel events have no portable finger-up phase. Settle on a sustained
@@ -546,21 +749,39 @@ export function installXImageViewer() {
     });
     current.addEventListener('click', event => { if (event.target === current) close(); });
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(type, endDrag);
-    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, zoomOut, scaleLabel, zoomIn, fit, actual, rotate, copy, download, previous, next, helpButton);
+    const imageTools = document.createElement('div'); imageTools.className = 'se-image-tools';
+    imageTools.append(zoomOut, scaleLabel, zoomIn, fit, actual, rotate, copy, download);
+    toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, imageTools, helpButton);
     canvas.append(img); stage.append(canvas);
     notice.append(feedback, retry);
-    viewport.append(stage, sidePrevious, sideNext, notice);
-    current.append(style, toolbar, viewport, copyStatus, help, shortcuts);
+    viewport.append(stage, notice);
+    current.append(style, toolbar, viewport, sidePrevious, sideNext, copyStatus, help, shortcuts);
     current.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    document.body.append(current);
+    host.append(current); document.body.append(host);
+    document.addEventListener('fullscreenchange',fullscreenChange);
+    let holdTimer = 0, pendingSpeed = false;
+    function releaseSpeed() {
+      window.clearTimeout(holdTimer); pendingSpeed = false; speed?.hold(false);
+    }
+    function keyup(e: KeyboardEvent) {
+      const target = e.target as Element | null;
+      if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || target?.closest?.('input,textarea,select,[role=slider],[contenteditable=true]')) return;
+      e.stopImmediatePropagation();
+      if (e.key === '>' || e.code === 'Period' || e.key === 'Shift') {
+        if (pendingSpeed) speed?.step(.25);
+        releaseSpeed();
+      }
+    }
     show(index);
-    current.showModal();
     // Capture before host-page shortcuts can cancel the dialog's native Esc action.
     // Also cover the source frame if focus is moved back there by the host.
     const windows = new Set<Window>([window]);
     if (trigger.ownerDocument.defaultView) windows.add(trigger.ownerDocument.defaultView);
     const keyboard = (event: KeyboardEvent) => {
-      if (event.isComposing) return;
+      videoBar?.wake();
+      if (event.isComposing || speed?.keys(event)) return;
+      const el = event.target as Element | null;
+      if (el?.closest?.('[role=slider],input[type=range]')) return;
       if (event.key === 'Escape') {
         event.preventDefault(); event.stopImmediatePropagation(); close(); return;
       }
@@ -568,9 +789,32 @@ export function installXImageViewer() {
       if (event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as Element | null;
       if (target?.nodeType === 1 && target.closest('input,textarea,select,[contenteditable="true"]')) return;
+      if ((event.key === ' ' || event.key === 'Enter') && target?.closest?.('button')) {
+        // Keep native keyboard activation without also triggering X's shortcuts.
+        event.stopImmediatePropagation(); return;
+      }
       const key = event.key.toLowerCase();
       let action: (() => void) | undefined;
       if (key === '?') action = () => { if (!event.repeat) toggleHelp(); };
+      else if (player) {
+        const video = player.querySelector('video');
+        if (!video) return;
+        if (key === 'home' || key === 'end') action = () => navigate(key === 'home' ? 0 : items.length - 1);
+        else if (key === 'j' || key === 'l' || (items.length === 1 && ['arrowleft','arrowright'].includes(key)))
+          action = () => { video.currentTime = Math.min(video.duration || Infinity, Math.max(0,video.currentTime + (['j','arrowleft'].includes(key) ? -5 : 5))); };
+        else if (['arrowleft','arrowup','pageup'].includes(key)) action = () => navigate(index - 1);
+        else if (['arrowright','arrowdown','pagedown'].includes(key)) action = () => navigate(index + 1);
+        else if ([' ','k'].includes(key)) action = () => { if (video.paused) void video.play()?.catch(() => {}); else video.pause(); };
+        else if (key === 'm' && !videoBar?.gif) action = () => options.toggleMute(video);
+        else if (key === '<' || key === '>') action = () => {
+          if (!speed || event.repeat) return;
+          if (key === '>' && event.shiftKey) {
+            const control = speed;
+            pendingSpeed = true;
+            holdTimer = window.setTimeout(() => { pendingSpeed = false; control.hold(true); },400);
+          } else speed.step(key === '>' ? .25 : -.25);
+        };
+      }
       else if (key === '+' || key === '=') action = () => zoom(scale * 1.25);
       else if (key === '-') action = () => zoom(scale / 1.25);
       else if (key === '0' || key === 'f') action = fitImage;
@@ -580,9 +824,9 @@ export function installXImageViewer() {
       else if (key === 't') action = () => { if (!event.repeat) rotateImage(); };
       else if (key === 'r' && !retry.hidden) action = () => show(index);
       else if (key === 'home') action = () => navigate(0);
-      else if (key === 'end') action = () => navigate(photos.length - 1);
-      else if (key === 'pageup') action = () => navigate(index - 1);
-      else if (key === 'pagedown') action = () => navigate(index + 1);
+      else if (key === 'end') action = () => navigate(items.length - 1);
+      else if (key === 'pageup' || (key === 'arrowup' && !stage.hasAttribute('data-pannable'))) action = () => navigate(index - 1);
+      else if (key === 'pagedown' || (key === 'arrowdown' && !stage.hasAttribute('data-pannable'))) action = () => navigate(index + 1);
       else if (key === 'arrowleft' && !event.shiftKey) action = () => navigate(index - 1);
       else if (key === 'arrowright' && !event.shiftKey) action = () => navigate(index + 1);
       else {
@@ -594,17 +838,27 @@ export function installXImageViewer() {
           stage.scrollTop += direction[1] * step;
         };
       }
-      if (!action) return;
+      if (!action) {
+        event.stopImmediatePropagation();
+        return;
+      }
       event.preventDefault(); event.stopImmediatePropagation();
       action();
     };
     windows.forEach(source => source.addEventListener('keydown', keyboard, true));
     const resize = new window.ResizeObserver(() => { stopSwipe(true); render(); });
     resize.observe(stage);
-    const blur = () => { stopSwipe(true); endDrag(); };
+    windows.forEach(source => source.addEventListener('keyup', keyup, true));
+    const blur = () => { releaseSpeed(); stopSwipe(true); endDrag(); };
     window.addEventListener('blur', blur);
     disposeOpenView = () => {
       disposed = true;
+      document.removeEventListener('fullscreenchange', fullscreenChange);
+      releasePlayer(); options.activate(undefined); videoChrome.remove();
+      void exitOwned(); host.remove();
+      document.documentElement.style.overflow = overflow;
+      window.scrollTo(...scroll);
+      windows.forEach(source => source.removeEventListener('keyup', keyup, true));
       copyController?.abort(); copyController = undefined;
       clearPreview();
       stopSwipe();
@@ -625,23 +879,20 @@ export function installXImageViewer() {
       if (!photo || !article || photo.closest('video,[data-testid="videoPlayer"]') || photo.querySelector('video')) return false;
       const link = photo.closest('a');
       if (link?.target === '_blank' || link?.hasAttribute('download')) return false;
-      const group = photo.closest('[role="link"]:not(a)') ?? article;
-      const mediaTile = (img: Element) => img.closest('a[href*="/photo/"],div:has(> a[href*="/photo/"])');
-      const images = Array.from(group.querySelectorAll<HTMLImageElement>(PHOTO_IMAGE)).filter(img => {
-        if ((img.closest('[role="link"]:not(a)') ?? img.closest(POST)) !== group) return false;
-        if (!img.closest('[data-testid="tweetPhoto"]') && !mediaTile(img)) return false;
-        try { const url = new URL(img.currentSrc || img.src); return url.protocol === 'https:' && url.hostname === 'pbs.twimg.com' && url.pathname.startsWith('/media/'); } catch { return false; }
-      });
-      const index = images.findIndex(img => photo.contains(img) || (photo.matches('a[href*="/photo/"]') && mediaTile(img) === photo.parentElement));
+      const items = postMedia(photo);
+      const index = items.findIndex(item => 'image' in item && (photo.contains(item.element) ||
+        (photo.matches('a[href*="/photo/"]') && mediaTile(item.element) === photo.parentElement)));
       if (index < 0) return false;
       event.preventDefault(); event.stopImmediatePropagation();
-      open(images.map(img => {
-        const url = new URL(img.currentSrc || img.src); url.searchParams.set('name', 'orig');
-        return { src: url.href, alt: img.alt, preview: img.complete && img.naturalWidth > 0 ? img.currentSrc || img.src : undefined };
-      }), index, (photo.closest('a,button,[tabindex]') ?? article) as HTMLElement);
+      open(items,index,(photo.closest('a,button,[tabindex]') ?? article) as HTMLElement);
       return true;
     },
     close,
-    remove: close,
+    refreshControls(player: HTMLElement) { refreshControls?.(player); },
+    openVideo(player: HTMLElement, trigger: HTMLElement) {
+      const items = postMedia(player);
+      const index = items.findIndex(item => 'player' in item && item.player === player);
+      if (index >= 0) open(items,index,trigger);
+    },
   };
 }

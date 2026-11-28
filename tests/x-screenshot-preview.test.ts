@@ -109,15 +109,17 @@ test('changing options discards stale exports and handles encoding failure on th
   await Promise.resolve();
   const dialog = doc.querySelector('dialog')!;
   assert.equal(dialog.hasAttribute('data-dark'), true);
-  const checkboxes = dialog.querySelectorAll('input');
-  assert.equal(checkboxes.length, 2);
-  checkboxes[0].checked = true;
-  checkboxes[0].dispatchEvent(new win.Event('change') as unknown as Event);
+  const toggles = dialog.querySelectorAll<HTMLButtonElement>('button[aria-pressed]');
+  assert.equal(toggles.length, 2);
+  assert.equal(toggles[1].getAttribute('aria-pressed'),'true');
+  toggles[0].click();
+  assert.equal(toggles[0].getAttribute('aria-pressed'),'true');
+  assert.equal(doc.querySelector('canvas'),original);
   assert.deepEqual(rerenderOptions, { hideMetrics: true, includeParent: true });
   failOriginal(null);
   await new Promise(setImmediate);
   const copy = doc.querySelector<HTMLButtonElement>('[data-copy]')!;
-  assert.equal(doc.querySelector('canvas'), updated);
+  assert.equal(doc.querySelector('canvas:not([data-outgoing])'), updated);
   assert.equal(copy.disabled, false);
   failUpdated(null);
   await new Promise(setImmediate);
@@ -136,4 +138,42 @@ test('a failed speculative encoding can be retried on the same canvas', async ()
   canvas.toBlob = callback => callback(blob);
   assert.equal(await encodeScreenshot(canvas), blob);
   await win.happyDOM.close();
+});
+
+test('keyboard toggles reuse idle-rendered canvases and PNGs while the preview body stays mounted', async () => {
+  const { win, doc, trigger } = setup();
+  const renders: string[] = [], encodes: string[] = [];
+  function canvas(id: string) {
+    const el = doc.createElement('canvas');
+    el.dataset.key = id;
+    el.toBlob = cb => { encodes.push(id); cb(new Blob()); };
+    return el;
+  }
+  let idle!: () => void;
+  Object.defineProperty(win,'requestIdleCallback',{value:(fn: () => void) => { idle = fn; }});
+  const initial = canvas('false/true');
+  const close = showScreenshotPreview(doc,Promise.resolve(initial),trigger,{
+    hasParent:true,
+    rerender: async ({ hideMetrics, includeParent }) => {
+      const id = hideMetrics + '/' + includeParent;
+      renders.push(id); return canvas(id);
+    },
+  });
+  await Promise.resolve(); idle(); await new Promise(setImmediate);
+  const dialog = doc.querySelector('dialog')!, body = dialog.querySelector('.se-shot-body');
+  // happy-dom does not resolve dynamic viewport units. Browser regression
+  // measures the actual top edge and the gap below the canvas.
+  assert.match(dialog.querySelector('style')!.textContent!,/margin:5dvh auto auto;transition:height 150ms/);
+  assert.match(dialog.querySelector('style')!.textContent!,/max-height:90dvh/);
+  assert.equal(dialog.querySelector('h2'),null);
+  assert.equal(dialog.querySelector('[data-copy]')?.textContent,'Copy');
+  for (const [key, expected] of [['h','true/true'],['p','true/false'],['h','false/false'],['p','false/true']]) {
+    dialog.dispatchEvent(new win.KeyboardEvent('keydown',{key,bubbles:true}) as unknown as Event);
+    assert.ok(body!.querySelector('canvas'));
+    await Promise.resolve();
+    assert.equal(dialog.querySelector('.se-shot-body'),body);
+    assert.equal(body!.querySelector<HTMLCanvasElement>('canvas:not([data-outgoing])')!.dataset.key,expected);
+  }
+  assert.equal(renders.length,3); assert.equal(new Set(encodes).size,4); assert.equal(encodes.length,4);
+  close(); await win.happyDOM.close();
 });
