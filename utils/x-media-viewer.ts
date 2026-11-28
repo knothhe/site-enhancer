@@ -60,13 +60,13 @@ const ICONS = {
   download: 'M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
   rotate: 'M21 12a9 9 0 1 1-3-6.7L21 8m0-5v5h-5',
 };
-/** One top-level viewer shared by timeline and same-origin detail documents. */
+/** One active viewer shared by timeline and same-origin detail documents. */
 export function createMediaViewer(options: {
   speed(player: HTMLElement): SpeedControl | undefined;
   activate(player?: HTMLElement): void;
   setVolume(video: HTMLVideoElement, level: number): void;
   toggleMute(video: HTMLVideoElement): void;
-  nativeVideoUrl?: (video: HTMLVideoElement) => string | undefined;
+  subtitlePost?: { label: string; open(video: HTMLVideoElement): void };
 }) {
   let dialog: HTMLDialogElement | undefined;
   let restoreFocus: HTMLElement | undefined;
@@ -84,7 +84,12 @@ export function createMediaViewer(options: {
   function open(items: MediaItem[], index: number, trigger: HTMLElement) {
     close();
     restoreFocus = trigger;
-    const scroll = [window.scrollX, window.scrollY] as const;
+    // Keep the fullscreen host, live player and its controls in one fullscreen stack.
+    // Photo-only galleries can still cover the timeline using the top-level dialog.
+    const doc = items.some(item => 'player' in item) ? trigger.ownerDocument : document;
+    const view = doc.defaultView!;
+    const frameGallery = doc !== document;
+    const scroll = [view.scrollX, view.scrollY] as const;
     function imageAt(i: number) {
       const item = items[i];
       return item && 'image' in item ? item.image : undefined;
@@ -92,8 +97,8 @@ export function createMediaViewer(options: {
     const mixed = items.some(item => 'image' in item) && items.some(item => 'player' in item);
     // The Fullscreen API rejects HTMLDialogElement. Fullscreen its container and
     // show the dialog non-modally inside it when coming from a fullscreen player.
-    const host = document.createElement('div');
-    const videoChrome = document.createElement('div');
+    const host = doc.createElement('div');
+    const videoChrome = doc.createElement('div');
     videoChrome.tabIndex = -1;
     videoChrome.className = 'se-media-controls se-video-chrome';
     videoChrome.addEventListener('click', event => event.stopPropagation());
@@ -103,22 +108,23 @@ export function createMediaViewer(options: {
     let fullscreen = false;
     let switching = 0, sequence = 0;
     let lifted: HTMLElement | undefined;
-    const overflow = document.documentElement.style.overflow;
-    document.documentElement.style.overflow = 'hidden';
+    const overflow = doc.documentElement.style.overflow;
+    doc.documentElement.style.overflow = 'hidden';
     const owned = new Set<Element>([host]);
     const zh = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
-    const current = document.createElement('dialog');
+    const current = doc.createElement('dialog');
     dialog = current;
     current.id = 'site-enhancer-media-viewer';
     current.className = 'se-media-controls';
     current.setAttribute('aria-label', zh ? '媒体查看' : 'Media viewer');
-    const style = document.createElement('style');
+    const style = doc.createElement('style');
     style.textContent = VIDEO_BAR_CSS + `
 #site-enhancer-media-viewer{position:fixed;inset:0;margin:0;width:100vw;height:100dvh;max-width:none;max-height:none;border:0;padding:16px;background:#101318;color:#fff;box-sizing:border-box;font:14px/1.5 system-ui;overflow:hidden}
 #site-enhancer-media-viewer[open]{display:flex;flex-direction:column}
 #site-enhancer-media-viewer::backdrop{background:#000b}
 .se-media-controls header{display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:nowrap}
 .se-media-controls button{font:inherit;background:#ffffff15;color:#fff;border:0;border-radius:8px;padding:9px;cursor:pointer;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.se-media-controls button.se-subtitle-post{width:auto;min-width:0;height:auto;flex-shrink:1;font-size:12px}
 .se-media-controls button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
 .se-media-controls button:not(:disabled):hover{background:#ffffff29}
 .se-media-controls button:disabled{opacity:.35;cursor:default}
@@ -155,20 +161,20 @@ export function createMediaViewer(options: {
 .se-media-controls .se-speed [data-site-enhancer-video-speed]{border-radius:18px}
 .se-media-controls .se-speed :is([data-changed],[aria-checked=true]){background:var(--se-x-accent,#1d9bf0)}
 `;
-    const toolbar = document.createElement('header');
-    const count = document.createElement('span');
+    const toolbar = doc.createElement('header');
+    const count = doc.createElement('span');
     count.className = 'se-image-count';
     count.setAttribute('aria-live', 'polite');
-    const viewport = document.createElement('div');
+    const viewport = doc.createElement('div');
     viewport.className = 'se-image-viewport';
-    const stage = document.createElement('div');
+    const stage = doc.createElement('div');
     stage.className = 'se-image-stage';
     stage.tabIndex = 0;
     stage.setAttribute('aria-label', zh ? '图片，可滚动和拖动' : 'Image, scroll or drag to explore');
-    const canvas = document.createElement('div');
+    const canvas = doc.createElement('div');
     canvas.className = 'se-image-canvas';
     const motion = createImageMotion(viewport, stage, canvas);
-    let img = document.createElement('img');
+    let img = doc.createElement('img');
     img.draggable = false;
     let preview: HTMLImageElement | undefined;
     let reveal: Animation | undefined;
@@ -197,7 +203,7 @@ export function createMediaViewer(options: {
         if (priority === 'high') existing.image.fetchPriority = 'high';
         return existing;
       }
-      const candidate = document.createElement('img');
+      const candidate = doc.createElement('img');
       candidate.draggable = false; candidate.hidden = true;
       candidate.decoding = 'async'; candidate.fetchPriority = priority;
       candidate.alt = imageAt(target)!.alt;
@@ -239,10 +245,10 @@ export function createMediaViewer(options: {
         if (target >= 0 && imageAt(target) && !decoded.has(target) && !requests.has(target)) requestImage(target, 'low');
       }
     }
-    const help = document.createElement('p');
+    const help = doc.createElement('p');
     help.className = 'se-image-help';
     help.textContent = zh ? '← → / 触摸板横滑切图 · + / − 缩放 · C 复制 · E 下载 · T 旋转 · ? 快捷键 · Esc 关闭' : '← → / Swipe to browse · + / − Zoom · C Copy · E Download · T Rotate · ? Shortcuts · Esc Close';
-    const shortcuts = document.createElement('div');
+    const shortcuts = doc.createElement('div');
     shortcuts.className = 'se-image-shortcuts';
     shortcuts.id = 'se-image-shortcuts';
     shortcuts.hidden = true;
@@ -250,7 +256,7 @@ export function createMediaViewer(options: {
       ? '← / → 或 PageUp / PageDown 切图；Home / End 首张 / 末张；+ / − 缩放；0 / F 适应窗口；1 原始大小；C 复制图片；E 下载原图；T 旋转 90°；W A S D 或 Shift + 方向键平移；↑ / ↓ 垂直滚动；R 重试；? 显示 / 隐藏快捷键；Tab 切换控件；Enter / 空格激活按钮；Esc 关闭。双击缩放，Ctrl / ⌘ + 滚轮缩放，普通滚轮滚动。触摸板横向滑动切图；图片超出窗口时，滑动用于平移图片。'
       : '← / → or PageUp / PageDown: browse; Home / End: first / last; + / −: zoom; 0 / F: fit; 1: actual size; C: copy image; E: download original; T: rotate 90°; W A S D or Shift + arrows: pan; ↑ / ↓: scroll vertically; R: retry; ?: toggle shortcuts; Tab: move focus; Enter / Space: activate buttons; Esc: close. Double-click to zoom; Ctrl / ⌘ + scroll to zoom; scroll normally to pan. Swipe horizontally to browse; when the image exceeds the viewport, swipe to pan instead.';
     shortcuts.textContent += zh ? ' 视频：空格 / K 播放或暂停，J / L 快退或快进 5 秒（单项也可用 ← / →），M 静音，< / > 调速，按住 Shift+> 临时 2×。无法平移时 ↑ / ↓ 切换媒体。' : ' Video: Space / K play or pause, J / L seek 5 seconds (also ← / → for a single item), M mute, < / > speed, hold Shift+> for 2×. ↑ / ↓ browse when the image fits.';
-    const scaleLabel = document.createElement('span');
+    const scaleLabel = doc.createElement('span');
     scaleLabel.className = 'se-image-scale';
     let scale = 1;
     let rotation = 0;
@@ -305,21 +311,21 @@ export function createMediaViewer(options: {
       endDrag(); fitted = true; render();
       stage.scrollLeft = 0; stage.scrollTop = 0;
     }
-    const notice = document.createElement('div');
+    const notice = doc.createElement('div');
     notice.className = 'se-image-notice';
     notice.hidden = true;
-    const feedback = document.createElement('p');
+    const feedback = doc.createElement('p');
     feedback.setAttribute('role', 'status');
     feedback.className = 'se-image-feedback';
     function button(label: string, action: () => void, icon: keyof typeof ICONS, keys: string) {
-      const result = document.createElement('button');
+      const result = doc.createElement('button');
       result.type = 'button';
       result.setAttribute('aria-label', label);
       result.setAttribute('aria-keyshortcuts', keys);
       result.title = `${label} (${keys})`;
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', ICONS[icon]); svg.append(path); result.append(svg);
       result.addEventListener('click', action);
       return result;
@@ -340,7 +346,7 @@ export function createMediaViewer(options: {
     const zoomIn = button(zh ? '放大' : 'Zoom in', () => zoom(scale * 1.25), 'in', '+ =');
     const fit = button(zh ? '适应窗口' : 'Fit to window', fitImage, 'fit', '0 F');
     const actual = button(zh ? '原始大小' : 'Actual size', () => zoom(1), 'actual', '1');
-    const copyStatus = document.createElement('p');
+    const copyStatus = doc.createElement('p');
     copyStatus.className = 'se-image-help se-image-feedback';
     copyStatus.setAttribute('role', 'status');
     const copy = button(zh ? '复制图片' : 'Copy image', () => { void copyImage(); }, 'copy', 'C');
@@ -366,7 +372,7 @@ export function createMediaViewer(options: {
         if (disposed) return;
         const ext = blob.type.split('/')[1]?.replace('jpeg', 'jpg').replace(/[^a-z0-9]/gi, '') || 'jpg';
         const objectUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
+        const a = doc.createElement('a');
         a.href = objectUrl;
         a.download = `x-image-${displayedIndex + 1}.${ext}`;
         a.click();
@@ -410,6 +416,17 @@ export function createMediaViewer(options: {
     const helpButton = button(zh ? '快捷键' : 'Keyboard shortcuts', toggleHelp, 'help', '?');
     helpButton.setAttribute('aria-expanded', 'false');
     helpButton.setAttribute('aria-controls', shortcuts.id);
+    const subtitlePost = doc.createElement('button');
+    if (frameGallery && options.subtitlePost) {
+      subtitlePost.type = 'button';
+      subtitlePost.className = 'se-subtitle-post';
+      subtitlePost.textContent = options.subtitlePost.label;
+      subtitlePost.onclick = () => {
+        const video = player?.querySelector('video');
+        if (video) options.subtitlePost?.open(video);
+      };
+      toolbar.append(subtitlePost);
+    }
     function releasePlayer() {
       if (lifted) {
         if (lifted.isConnected) lifted.hidePopover();
@@ -428,13 +445,13 @@ export function createMediaViewer(options: {
       player = undefined;
     }
     function fullscreenChange() {
-      if (!switching && fullscreen && document.fullscreenElement !== (player ?? host)) close();
+      if (!switching && fullscreen && doc.fullscreenElement !== (player ?? host)) close();
     }
     async function exitOwned() {
-      while (document.fullscreenElement && owned.has(document.fullscreenElement)) {
-        const before = document.fullscreenElement;
-        try { await document.exitFullscreen(); } catch { break; }
-        if (document.fullscreenElement === before) break;
+      while (doc.fullscreenElement && owned.has(doc.fullscreenElement)) {
+        const before = doc.fullscreenElement;
+        try { await doc.exitFullscreen(); } catch { break; }
+        if (doc.fullscreenElement === before) break;
       }
     }
     refreshControls = target => {
@@ -451,12 +468,12 @@ export function createMediaViewer(options: {
     function present(nextPlayer?: HTMLElement) {
       const outgoing = player?.querySelector('video') ?? (loaded ? img : preview);
       const still = generation > 1 ? transitionStill(outgoing) : undefined;
-      const wantsFullscreen = nextPlayer || fullscreen || switching || document.fullscreenElement;
+      const wantsFullscreen = frameGallery || nextPlayer || fullscreen || switching || doc.fullscreenElement;
       const token = switching = ++sequence;
       const destination = nextPlayer ?? host;
       owned.add(destination);
       let request: Promise<void> | undefined;
-      if (wantsFullscreen && document.fullscreenElement !== destination) {
+      if (wantsFullscreen && doc.fullscreenElement !== destination) {
         try { request = destination.requestFullscreen?.(); }
         catch { /* Use the modal or fixed player. */ }
       }
@@ -466,6 +483,7 @@ export function createMediaViewer(options: {
       // the video we just paused, using the existing single-playback gate.
       options.activate(player ?? (mixed ? host : undefined));
       for (const tool of [zoomOut,scaleLabel,zoomIn,fit,actual,rotate,copy,download]) tool.hidden = !!player;
+      subtitlePost.hidden = !player;
       if (player) {
         if (current.open) current.close();
         player.setAttribute('data-site-enhancer-video-expanded','');
@@ -477,7 +495,7 @@ export function createMediaViewer(options: {
         current.prepend(toolbar); current.append(sidePrevious,sideNext,shortcuts);
         videoChrome.remove();
         if (!current.open) {
-          if (request || document.fullscreenElement === host) current.show();
+          if (request || doc.fullscreenElement === host) current.show();
           else current.showModal();
         }
       }
@@ -497,14 +515,14 @@ export function createMediaViewer(options: {
         } else if (!player) { current.close(); current.showModal(); }
       }
       if (!request) {
-        switching = 0; fullscreen = document.fullscreenElement === destination;
+        switching = 0; fullscreen = doc.fullscreenElement === destination;
         if (!fullscreen && nextPlayer) fallback();
         return;
       }
       void request.then(() => {
         if (disposed) { if (!dialog) void exitOwned(); return; }
         if (token !== switching) return;
-        switching = 0; fullscreen = document.fullscreenElement === destination;
+        switching = 0; fullscreen = doc.fullscreenElement === destination;
       }, async () => {
         if (disposed || token !== switching) return;
         fullscreen = false;
@@ -523,14 +541,9 @@ export function createMediaViewer(options: {
       const request = ++generation;
       const item = items[index];
       const nextPlayer = 'player' in item ? item.player : undefined;
-      if ('player' in item && item.player.ownerDocument !== document) {
-        const url = options.nativeVideoUrl?.(item.element);
-        if (url) window.location.assign(url);
-        return;
-      }
       if (request === 1 || player !== nextPlayer) present(nextPlayer);
       if (!loaded && imageAt(index)?.preview) {
-        preview = document.createElement('img');
+        preview = doc.createElement('img');
         preview.src = imageAt(index)!.preview!;
         preview.alt = imageAt(index)!.alt;
         preview.draggable = false;
@@ -749,7 +762,7 @@ export function createMediaViewer(options: {
     });
     current.addEventListener('click', event => { if (event.target === current) close(); });
     for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) stage.addEventListener(type, endDrag);
-    const imageTools = document.createElement('div'); imageTools.className = 'se-image-tools';
+    const imageTools = doc.createElement('div'); imageTools.className = 'se-image-tools';
     imageTools.append(zoomOut, scaleLabel, zoomIn, fit, actual, rotate, copy, download);
     toolbar.append(button(zh ? '关闭' : 'Close', close, 'close', 'Escape'), count, imageTools, helpButton);
     canvas.append(img); stage.append(canvas);
@@ -757,8 +770,8 @@ export function createMediaViewer(options: {
     viewport.append(stage, notice);
     current.append(style, toolbar, viewport, sidePrevious, sideNext, copyStatus, help, shortcuts);
     current.addEventListener('cancel', event => { event.preventDefault(); close(); });
-    host.append(current); document.body.append(host);
-    document.addEventListener('fullscreenchange',fullscreenChange);
+    host.append(current); doc.body.append(host);
+    doc.addEventListener('fullscreenchange',fullscreenChange);
     let holdTimer = 0, pendingSpeed = false;
     function releaseSpeed() {
       window.clearTimeout(holdTimer); pendingSpeed = false; speed?.hold(false);
@@ -853,11 +866,11 @@ export function createMediaViewer(options: {
     window.addEventListener('blur', blur);
     disposeOpenView = () => {
       disposed = true;
-      document.removeEventListener('fullscreenchange', fullscreenChange);
+      doc.removeEventListener('fullscreenchange', fullscreenChange);
       releasePlayer(); options.activate(undefined); videoChrome.remove();
       void exitOwned(); host.remove();
-      document.documentElement.style.overflow = overflow;
-      window.scrollTo(...scroll);
+      doc.documentElement.style.overflow = overflow;
+      view.scrollTo(...scroll);
       windows.forEach(source => source.removeEventListener('keyup', keyup, true));
       copyController?.abort(); copyController = undefined;
       clearPreview();

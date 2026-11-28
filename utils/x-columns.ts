@@ -1,6 +1,7 @@
 import { PRIMARY as PRIMARY_COLUMN, PRIMARY_POST, POST, POST_LINK, TIMESTAMP, PLAYER, WEB, COLUMN_MAIN, focusedPost, isNativeRoute } from './x-dom.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { DETAIL_READY_MESSAGE } from './x-detail-ready.ts';
+import { restoreVideoPosition } from './x-video-position.ts';
 import { installXMedia } from './x-media.ts';
 import { DETAIL_PENDING_ATTR } from './x-video-gate.ts';
 import { installDetailHistory } from './x-detail-history.ts';
@@ -223,6 +224,7 @@ export function installXColumns(options: {
   releaseDetail?: () => void;
 } = {}) {
   const root = document.documentElement;
+  const stopVideoRestore = restoreVideoPosition(nativeVideoUrl);
   const media = installXMedia({
     nativeVideoUrl: video => nativeVideoUrl(video, selected),
     isPrimaryPost(video) {
@@ -1111,6 +1113,7 @@ export function installXColumns(options: {
     },
     remove() {
       disposed = true;
+      stopVideoRestore?.();
       mediaEnhanced = false;
       structureObserver.disconnect();
       if (structureFrame !== undefined) window.cancelAnimationFrame(structureFrame);

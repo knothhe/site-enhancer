@@ -438,22 +438,91 @@ test('a denied fullscreen request falls back in place and can be reopened in ful
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
 });
 
-test('detail video opens its native top-level post and cached hidden details cannot autoplay', t => {
+test('detail fullscreen keeps the live player and selection, and cached hidden details cannot autoplay', async t => {
   start();
   const frame = selectDetail(123);
   const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
-  const { player, video, play } = addVideo(detail.document as unknown as Document);
+  const doc = detail.document as unknown as Document;
+  const { player, video, play } = addVideo(doc);
   signalDetail(detail);
   const navigate = t.mock.method(window.location, 'assign', () => {});
-  player.querySelector('button')!.dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
-  assert.equal(navigate.mock.calls[0].arguments[0], 'https://x.com/alice/status/123');
+  video.src = 'blob:https://x.com/detail-stream';
+  video.currentTime = 37;
+  const button = player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!;
+  assert.equal(button.title, '全屏观看');
+  button.click();
+  await Promise.resolve();
+  assert.equal(doc.fullscreenElement, player);
   assert.equal(player.querySelector('video'), video);
+  assert.equal(video.currentTime, 37);
+  assert.equal(video.src, 'blob:https://x.com/detail-stream');
+  await doc.exitFullscreen();
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
+  assert.equal(detail.document.activeElement, button);
+  assert.equal(document.querySelector('iframe:not([hidden])'), frame);
+  assert.equal(navigate.mock.callCount(), 0);
   selectDetail(456);
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(video.paused, true);
   play(); assert.equal(video.paused, true);
   selectDetail(123);
   play(); assert.equal(video.paused, false);
+});
+
+test('browsing a detail photo to its video stays in the gallery', async t => {
+  start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const doc = detail.document as unknown as Document;
+  const { player, video } = addVideo(doc);
+  player.insertAdjacentHTML('beforebegin', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/mixed"></div>');
+  signalDetail(detail);
+  const navigate = t.mock.method(window.location, 'assign', () => {});
+  detail.document.querySelector('img')!.click();
+  const gallery = detail.document.querySelector('dialog')!;
+  assert.equal(gallery.querySelector('.se-image-count')?.textContent, '1 / 2');
+  gallery.querySelector('button[data-direction=next]')!.dispatchEvent(new detail.MouseEvent('click', { bubbles: true }));
+  await Promise.resolve();
+  assert.equal(doc.fullscreenElement, player);
+  assert.equal(player.querySelector('video'), video);
+  assert.equal(player.querySelector('.se-image-count')?.textContent, '2 / 2');
+  assert.equal(navigate.mock.callCount(), 0);
+  assert.equal(document.querySelector('iframe:not([hidden])'), frame);
+});
+
+test('subtitle action navigates and restores only the addressed attachment once metadata arrives', async t => {
+  document.documentElement.lang = 'en';
+  start();
+  const frame = selectDetail(123);
+  const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  const { player, video } = addVideo(detail.document as unknown as Document);
+  player.insertAdjacentHTML('beforebegin', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/first"></div>');
+  signalDetail(detail);
+  const navigate = t.mock.method(window.location, 'assign', () => {});
+  video.currentTime = 41.5;
+  player.querySelector<HTMLButtonElement>('[aria-label="Full screen"]')!.click();
+  player.querySelector<HTMLButtonElement>('.se-subtitle-post')!.click();
+  const destination = 'https://x.com/alice/status/123/video/2';
+  assert.deepEqual(navigate.mock.calls.map(call => call.arguments[0]), [destination]);
+  assert.equal(win.sessionStorage.length, 1);
+
+  columns!.remove();
+  columns = undefined;
+  win.happyDOM.setURL(destination);
+  const other = addVideo().video;
+  Object.defineProperty(other, 'readyState', { value: 1 });
+  const matching = addVideo().video;
+  start();
+  assert.equal(other.currentTime, 0);
+  assert.equal(matching.currentTime, 0);
+  Object.defineProperty(matching, 'readyState', { value: 1 });
+  matching.dispatchEvent(new win.Event('loadedmetadata') as unknown as Event);
+  assert.equal(matching.currentTime, 41.5);
+  assert.equal(other.currentTime, 0);
+  assert.equal(win.sessionStorage.length, 0);
+  matching.currentTime = 5;
+  matching.dispatchEvent(new win.Event('loadedmetadata') as unknown as Event);
+  assert.equal(matching.currentTime, 5);
 });
 
 test('an explicitly expanded feed video can play alone and pauses again when collapsed over details', async t => {
@@ -1845,5 +1914,7 @@ test('detail multi-video post prioritizes first focal video, resolves reply dest
   const navigate = t.mock.method(window.location, 'assign', () => {});
   reply.player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!
     .dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
+  assert.equal(navigate.mock.callCount(), 0);
+  reply.player.querySelector<HTMLButtonElement>('.se-subtitle-post')!.click();
   assert.equal(navigate.mock.calls[0].arguments[0], 'https://x.com/carol/status/456');
 });

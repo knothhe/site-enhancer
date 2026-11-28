@@ -1,4 +1,5 @@
 import { createSpeedControl, SPEED_CSS, type SpeedControl } from './x-video-speed.ts';
+import { saveVideoPosition } from './x-video-position.ts';
 import { createMediaViewer } from './x-media-viewer.ts';
 import { WEB, PLAYER } from './x-dom.ts';
 import { resolveLocale } from './i18n.ts';
@@ -41,8 +42,8 @@ export function installXMedia(options: {
   let expanded: HTMLElement | undefined;
   const speeds = new WeakMap<HTMLElement, SpeedControl>();
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
-    ? { native: '在 X 帖子中观看', expand: '全屏观看' }
-    : { native: 'Watch on X post', expand: 'Full screen' };
+    ? { subtitlePost: '在帖子页打开（字幕扩展）', expand: '全屏观看' }
+    : { subtitlePost: 'Open post page (for subtitles)', expand: 'Full screen' };
 
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
@@ -55,7 +56,16 @@ export function installXMedia(options: {
   });
   const viewer = createMediaViewer({
     speed: player => speeds.get(player),
-    nativeVideoUrl: options.nativeVideoUrl,
+    subtitlePost: {
+      get label() { return labels().subtitlePost; },
+      open(video) {
+        if (blocked(video.ownerDocument)) return;
+        const url = options.nativeVideoUrl?.(video);
+        if (!url) return;
+        saveVideoPosition(url, video.currentTime);
+        window.location.assign(url);
+      },
+    },
     toggleMute: playback.toggleMute,
     setVolume: playback.setVolume,
     activate(player) {
@@ -116,12 +126,12 @@ export function installXMedia(options: {
       const button = doc.createElement('button');
       button.type = 'button';
       button.setAttribute(BUTTON, '');
-      if (!frame) button.setAttribute('aria-expanded', 'false');
+      button.setAttribute('aria-expanded', 'false');
       const width = player.getBoundingClientRect().width;
       button.toggleAttribute('data-compact', width > 0 && width < 260);
-      const icon = frame ? 'M14 3h7v7m0-7L10 14M10 5H4v15h15v-6' : 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5';
+      const icon = 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5';
       button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icon}"/></svg><span></span>`;
-      setLabel(button, frame ? labels().native : labels().expand);
+      setLabel(button, labels().expand);
       player.append(button);
       const speed = isGifVideo(video) ? undefined : createSpeedControl(player, playback);
       if (speed) speeds.set(player, speed);
@@ -176,12 +186,7 @@ export function installXMedia(options: {
       const player = button.closest<HTMLElement>(PLAYER);
       if (!player || players.get(player)?.button !== button) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      if (frame) {
-        if (frame.hidden) return;
-        const url = options.nativeVideoUrl?.(players.get(player)!.video);
-        if (url) window.location.assign(url);
-        return;
-      }
+      if (frame?.hidden) return;
       if (expanded === player) close(); else viewer.openVideo(player, button);
     }
     const observer = new MutationObserver(syncChanges);
