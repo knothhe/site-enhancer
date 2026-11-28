@@ -5,7 +5,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
+import { columnGeometry, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
 
 import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
@@ -109,13 +109,14 @@ function addVideo(doc = document) {
   Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
   video.pause = () => { paused = true; pauses++; };
   const play = () => { paused = false; video.dispatchEvent(new win.Event('play') as unknown as Event); };
-  // happy-dom does not implement the browser top layer. Browser verification
-  // covers rendering; this shim exercises ownership, cleanup and focus state.
-  let popover = false;
-  player.showPopover = () => { popover = true; };
-  player.hidePopover = () => { popover = false; };
-  const matches = player.matches.bind(player);
-  player.matches = selector => selector === ':popover-open' ? popover : matches(selector);
+  player.requestFullscreen = async () => {
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, value: player });
+    doc.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
+  };
+  doc.exitFullscreen = async () => {
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, value: null });
+    doc.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
+  };
   return { player, video, play, pauses: () => pauses };
 }
 
@@ -204,7 +205,7 @@ test('blocked feed autoplay is refused at play() so X cannot loop play/pause', a
   assert.equal(autoplay.video.paused, false, 'closing details lifts the gate');
 });
 
-test('video expansion keeps the original node and source, then restores focus and page interaction', () => {
+test('video expansion keeps the original node and source, then restores focus and page interaction', async () => {
   const { player, video } = addVideo();
   video.src = 'blob:https://x.com/existing-stream';
   video.currentTime = 42;
@@ -218,45 +219,72 @@ test('video expansion keeps the original node and source, then restores focus an
   assert.equal(video.currentTime, 42);
   assert.equal(video.src, 'blob:https://x.com/existing-stream');
   assert.equal(video.paused, false);
-  assert.equal(player.getAttribute('role'), 'dialog');
+  await Promise.resolve();
+  assert.equal(document.fullscreenElement, player);
   assert.equal(button.getAttribute('aria-expanded'), 'true');
-  assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, true);
-  button.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }) as unknown as Event);
-  assert.equal(player.hasAttribute('popover'), false);
+  await document.exitFullscreen();
+  assert.equal(document.fullscreenElement, null);
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
   assert.equal(document.activeElement, button);
   click('[data-site-enhancer-video-expand]');
   columns!.setEnabled(false);
-  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(player.querySelector('button'), null);
 });
 
-test('detail video expands its own frame and cached hidden details cannot autoplay', t => {
+test('native video destinations respect mixed media order, quoted posts and explicit video links', () => {
+  const article = document.querySelector('article')!;
+  article.insertAdjacentHTML('beforeend', `<a href="/alice/status/123/photo/1"><img></a><video></video>
+    <div role="link" data-href="/bob/status/789"><video></video></div>
+    <a href="/alice/status/123/video/3"><video></video></a>`);
+  const [second, quoted, linked] = article.querySelectorAll('video');
+  assert.equal(nativeVideoUrl(second), 'https://x.com/alice/status/123/video/2');
+  assert.equal(nativeVideoUrl(quoted), 'https://x.com/bob/status/789');
+  assert.equal(nativeVideoUrl(linked), 'https://x.com/alice/status/123/video/3');
+});
+
+test('a denied fullscreen request releases playback priority and keeps the control usable', async () => {
+  const { player } = addVideo();
+  const allow = player.requestFullscreen;
+  player.requestFullscreen = async () => { throw new TypeError('Fullscreen denied'); };
+  start();
+  click('[data-site-enhancer-video-expand]');
+  await Promise.resolve();
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
+  player.requestFullscreen = allow;
+  click('[data-site-enhancer-video-expand]');
+  await Promise.resolve();
+  assert.equal(document.fullscreenElement, player);
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
+});
+
+test('detail video opens its native top-level post and cached hidden details cannot autoplay', t => {
   start();
   const frame = selectDetail(123);
   const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
   const { player, video, play } = addVideo(detail.document as unknown as Document);
   signalDetail(detail);
+  const navigate = t.mock.method(window.location, 'assign', () => {});
   player.querySelector('button')!.dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
-  assert.equal(frame.hasAttribute('data-site-enhancer-video-frame'), true);
+  assert.equal(navigate.mock.calls[0].arguments[0], 'https://x.com/alice/status/123');
   assert.equal(player.querySelector('video'), video);
   selectDetail(456);
-  assert.equal(frame.hasAttribute('data-site-enhancer-video-frame'), false);
-  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(video.paused, true);
   play(); assert.equal(video.paused, true);
   selectDetail(123);
   play(); assert.equal(video.paused, false);
 });
 
-test('an explicitly expanded feed video can play alone and pauses again when collapsed over details', t => {
+test('an explicitly expanded feed video can play alone and pauses again when collapsed over details', async t => {
   const feed = addVideo(); start();
   const frame = selectDetail(123);
   const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
   const other = addVideo(detail.document as unknown as Document);
   signalDetail(detail);
   click('[data-site-enhancer-video-expand]');
+  await Promise.resolve();
   assert.equal(other.video.paused, true);
   feed.play(); assert.equal(feed.video.paused, false);
   other.play(); assert.equal(other.video.paused, true);
@@ -270,7 +298,7 @@ test('removing a virtualized expanded player releases background interaction', a
   click('[data-site-enhancer-video-expand]');
   player.remove();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(player.hasAttribute('popover'), false);
+  assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
   assert.equal(document.querySelector('[data-site-enhancer-video-expand]'), null);
 });
@@ -1595,7 +1623,7 @@ test('a column missing between routes keeps the layout, and a lasting absence re
   assert.equal(document.getElementById('site-enhancer-columns'), null);
 });
 
-test('detail multi-video post prioritizes first focal video, expands paused siblings directly into playback, and skips video hover preload while playing', async t => {
+test('detail multi-video post prioritizes first focal video, resolves reply destinations, and skips video hover preload while playing', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const prepared: string[] = [];
   columns = installXColumns({ prepareDetail: async url => { prepared.push(url); return url; } });
@@ -1635,10 +1663,8 @@ test('detail multi-video post prioritizes first focal video, expands paused sibl
   t.mock.timers.tick(500);
   assert.equal(prepared.length, countBeforeHover);
 
-  // Expanding the paused second video starts it immediately and pauses the first.
-  second.video.play = () => { second.play(); return Promise.resolve(); };
-  second.player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!
+  const navigate = t.mock.method(window.location, 'assign', () => {});
+  reply.player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!
     .dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
-  assert.equal(first.video.paused, true);
-  assert.equal(second.video.paused, false);
+  assert.equal(navigate.mock.calls[0].arguments[0], 'https://x.com/carol/status/456');
 });

@@ -7,7 +7,6 @@ const PLAYER_TEST_ID = 'videoPlayer';
 const POST_PLAYER = `[data-testid="primaryColumn"] article ${PLAYER}, ${WEB} main article ${PLAYER}`;
 const MEDIA = `${PLAYER},video`;
 const EXPANDED = 'data-site-enhancer-video-expanded';
-const FRAME = 'data-site-enhancer-video-frame';
 const BUTTON = 'data-site-enhancer-video-expand';
 const SPEED_BUTTON = 'data-site-enhancer-video-speed';
 const SPEEDS = [1, 1.25, 1.5, 2, 0.75] as const;
@@ -24,7 +23,7 @@ ${PLAYER} video{object-fit:contain!important}
 [${BUTTON}] svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;pointer-events:none}
 ${PLAYER}[${EXPANDED}]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:58px 24px 24px!important;box-sizing:border-box!important;border:0!important;border-radius:0!important;background:#101318!important;color:#fff!important;overflow:hidden!important}
 ${PLAYER}[${EXPANDED}]::backdrop{background:#101318}
-${PLAYER}[${EXPANDED}]>div{height:100%!important;max-height:100%!important}
+${PLAYER}[${EXPANDED}]>div:has(video){height:100%!important;max-height:100%!important}
 /* X uses a padding spacer inside its absolutely positioned player. */
 ${PLAYER}[${EXPANDED}]>div>div[style*="padding-bottom"]{display:none!important}
 ${PLAYER}[${EXPANDED}] video{object-fit:contain!important}
@@ -35,8 +34,9 @@ ${PLAYER}[${EXPANDED}] [${BUTTON}][data-compact] span{display:inline}
 `;
 
 /** Keep X's actual player (including its MediaSource, controls and event handlers)
- * in place. A popover promotes it to the top layer without cloning or moving it. */
+ * in place. Fullscreen lets caption extensions mount on the actual player. */
 export function installXVideoViewer(options: {
+  nativeVideoUrl?: (video: HTMLVideoElement) => string | undefined;
   isPrimaryPost?: (video: HTMLVideoElement) => boolean;
 } = {}) {
   const documents = new Map<Document, { dispose: () => void; frame?: HTMLIFrameElement }>();
@@ -44,8 +44,8 @@ export function installXVideoViewer(options: {
   let interruptedFeedVideo: HTMLVideoElement | undefined;
   let expanded: { player: HTMLElement; close: () => void } | undefined;
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
-    ? { expand: '放大观看', close: '收起视频 · Esc', title: '视频查看', speed: '播放倍速' }
-    : { expand: 'Expand video', close: 'Close video · Esc', title: 'Video viewer', speed: 'Playback speed' };
+    ? { native: '在 X 帖子中观看', expand: '全屏观看', close: '退出全屏 · Esc', speed: '播放倍速' }
+    : { native: 'Watch on X post', expand: 'Full screen', close: 'Exit full screen · Esc', speed: 'Playback speed' };
 
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
@@ -58,76 +58,45 @@ export function installXVideoViewer(options: {
   });
   function close() { expanded?.close(); }
 
-  function open(player: HTMLElement, button: HTMLButtonElement, frame?: HTMLIFrameElement) {
+  function open(player: HTMLElement, button: HTMLButtonElement) {
     close();
     const doc = player.ownerDocument;
-    if (!player.isConnected || frame?.hidden || typeof player.showPopover !== 'function') return;
     const focus = doc.activeElement as HTMLElement | null;
-    const saved = new Map(['popover', 'role', 'aria-modal', 'aria-label'].map(name => [name, player.getAttribute(name)]));
-    const inert: HTMLElement[] = [];
-    function isolate(element: HTMLElement) {
-      for (let node: HTMLElement | null = element; node?.parentElement; node = node.parentElement) {
-        for (const sibling of node.parentElement.children) {
-          const other = sibling as HTMLElement;
-          if (other !== node && !other.inert) { other.inert = true; inert.push(other); }
-        }
-      }
-    }
     function restore() {
-      if (expanded?.player !== player) return;
+      if (expanded?.close !== restore) return;
       expanded = undefined;
-      if (player.matches(':popover-open')) player.hidePopover();
+      doc.removeEventListener('fullscreenchange', onChange);
       player.removeAttribute(EXPANDED);
-      for (const [name, value] of saved) {
-        if (value === null) player.removeAttribute(name); else player.setAttribute(name, value);
-      }
-      frame?.removeAttribute(FRAME);
-      inert.forEach(element => { element.inert = false; });
-      doc.removeEventListener('keydown', keydown, true);
-      player.removeEventListener('toggle', toggle);
-      button.querySelector('span')!.textContent = labels().expand;
-      button.title = labels().expand;
-      button.setAttribute('aria-label', labels().expand);
+      setLabel(button, labels().expand);
       button.setAttribute('aria-expanded', 'false');
+      if (doc.fullscreenElement === player) void doc.exitFullscreen().catch(() => {});
       if (blocked(doc)) playback.pause(doc);
       if (focus?.isConnected) focus.focus({ preventScroll: true });
     }
-    function keydown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !doc.fullscreenElement) {
-        event.preventDefault(); event.stopImmediatePropagation(); close();
-      } else if (event.key === 'Tab') {
-        const controls = [...player.querySelectorAll<HTMLElement>('button,a[href],input,[tabindex]')]
-          .filter(element => element.tabIndex >= 0 && !element.hasAttribute('disabled') && element.getClientRects().length);
-        const first = controls[0] ?? button;
-        const last = controls.at(-1) ?? button;
-        if (event.shiftKey && (doc.activeElement === first || !player.contains(doc.activeElement))) {
-          event.preventDefault(); last.focus();
-        } else if (!event.shiftKey && (doc.activeElement === last || !player.contains(doc.activeElement))) {
-          event.preventDefault(); first.focus();
-        }
-      }
+    function onChange() {
+      if (doc.fullscreenElement !== player) restore();
     }
-    function toggle() { if (!player.matches(':popover-open')) restore(); }
     expanded = { player, close: restore };
-    player.setAttribute('popover', 'manual');
-    player.setAttribute('role', 'dialog');
-    player.setAttribute('aria-modal', 'true');
-    player.setAttribute('aria-label', labels().title);
-    player.setAttribute(EXPANDED, '');
-    frame?.setAttribute(FRAME, '');
-    try { player.showPopover(); } catch { restore(); return; }
-    documents.forEach((_entry, other) => playback.pause(other));
-    const targetVideo = player.querySelector<HTMLVideoElement>('video');
-    if (targetVideo?.paused) void targetVideo.play()?.catch(() => {});
-    isolate(player);
-    if (frame) isolate(frame);
-    doc.addEventListener('keydown', keydown, true);
-    player.addEventListener('toggle', toggle);
-    button.querySelector('span')!.textContent = labels().close;
-    button.title = labels().close;
-    button.setAttribute('aria-label', labels().close);
-    button.setAttribute('aria-expanded', 'true');
-    button.focus({ preventScroll: true });
+    doc.addEventListener('fullscreenchange', onChange);
+    void player.requestFullscreen().then(() => {
+      if (expanded?.close !== restore) {
+        if (doc.fullscreenElement === player && expanded?.player !== player) void doc.exitFullscreen().catch(() => {});
+        return;
+      }
+      player.setAttribute(EXPANDED, '');
+      setLabel(button, labels().close);
+      button.setAttribute('aria-expanded', 'true');
+      documents.forEach((_entry, other) => playback.pause(other));
+      const video = player.querySelector('video');
+      if (video?.paused) void video.play()?.catch(() => {});
+      button.focus({ preventScroll: true });
+    }, restore);
+  }
+
+  function setLabel(button: HTMLButtonElement, label: string) {
+    button.querySelector('span')!.textContent = label;
+    button.title = label;
+    button.setAttribute('aria-label', label);
   }
 
   function attach(doc: Document, frame?: HTMLIFrameElement) {
@@ -169,18 +138,16 @@ export function installXVideoViewer(options: {
         }
         return;
       }
-      if (typeof player.showPopover !== 'function') return;
+      if (!frame && typeof player.requestFullscreen !== 'function') return;
       const button = doc.createElement('button');
       button.type = 'button';
       button.setAttribute(BUTTON, '');
-      button.setAttribute('aria-expanded', 'false');
-      button.setAttribute('aria-haspopup', 'dialog');
+      if (!frame) button.setAttribute('aria-expanded', 'false');
       const width = player.getBoundingClientRect().width;
       button.toggleAttribute('data-compact', width > 0 && width < 260);
-      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></svg><span></span>';
-      button.querySelector('span')!.textContent = labels().expand;
-      button.title = labels().expand;
-      button.setAttribute('aria-label', labels().expand);
+      const icon = frame ? 'M14 3h7v7m0-7L10 14M10 5H4v15h15v-6' : 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5';
+      button.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${icon}"/></svg><span></span>`;
+      setLabel(button, frame ? labels().native : labels().expand);
       let speed: HTMLButtonElement | undefined;
       if (!isGifVideo(video)) {
         speed = doc.createElement('button');
@@ -254,7 +221,13 @@ export function installXVideoViewer(options: {
       const player = button.closest<HTMLElement>(PLAYER);
       if (!player || players.get(player)?.button !== button) return;
       event.preventDefault(); event.stopImmediatePropagation();
-      if (expanded?.player === player) close(); else open(player, button, frame);
+      if (frame) {
+        if (frame.hidden) return;
+        const url = options.nativeVideoUrl?.(players.get(player)!.video);
+        if (url) window.location.assign(url);
+        return;
+      }
+      if (expanded?.player === player) close(); else open(player, button);
     }
     const observer = new MutationObserver(syncChanges);
     documents.set(doc, { frame, dispose() {

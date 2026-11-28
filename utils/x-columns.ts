@@ -52,6 +52,26 @@ export function detailUrl(href: string, origin: string): string | undefined {
   } catch { return; }
 }
 
+/** Resolve at click time because X recycles articles and their players. */
+export function nativeVideoUrl(video: HTMLVideoElement, detailPost?: string) {
+  const origin = video.ownerDocument.location.origin;
+  const article = video.closest('article');
+  const link = video.closest<HTMLAnchorElement>('a[href]');
+  if (link?.origin === origin && /^\/(?:[\w]+|i\/web)\/status\/\d+\/video\/\d+\/?$/.test(link.pathname)) {
+    return origin + link.pathname;
+  }
+  const card = video.closest('[role="link"]:not(a)');
+  const quote = card && article?.contains(card) && resolveQuoteUrl(card, origin);
+  const post = quote || (article && detailUrl(postPermalink(article) ?? '', origin)) || detailPost;
+  if (!post || !article) return post;
+  // X numbers photos and videos together in a multi-attachment post.
+  // Exclude quoted media when computing the outer post's index and vice versa.
+  const media = Array.from((quote && card ? card : article).querySelectorAll('video,[data-testid="tweetPhoto"] img,a[href*="/photo/"] img'))
+    .filter(item => item.closest('article') === article && item.closest('[role="link"]:not(a)') === card);
+  const index = media.indexOf(video);
+  return media.length > 1 && index >= 0 ? `${post.replace(/\/$/, '')}/video/${index + 1}` : post;
+}
+
 export const DETAIL_FRAME_CSS = `
 ${WEB} body > div:has(> .flex > div.grid > main){max-width:none!important;padding:0!important;--x-main-column-width:100%!important}
 ${WEB} div:has(+ div.grid > main),${WEB} main + aside,${WEB} main :is([data-page-header],[data-top-chrome]),${WEB} [data-slot="xds-dock"]{display:none!important}
@@ -147,8 +167,6 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
 #site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
-#site-enhancer-columns:has(iframe[data-site-enhancer-video-frame]){z-index:2147483646}
-#site-enhancer-columns iframe[data-site-enhancer-video-frame]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
 #site-enhancer-columns [hidden]{display:none!important}
 /* Retain the cached browsing viewport: display:none resets inner layout and scroll in Chromium. */
@@ -208,6 +226,7 @@ export function installXColumns(options: {
   const root = document.documentElement;
   const imageViewer = installXImageViewer();
   const videoViewer = installXVideoViewer({
+    nativeVideoUrl: video => nativeVideoUrl(video, selected),
     isPrimaryPost(video) {
       const doc = video.ownerDocument;
       if (doc === document) return false;
@@ -1028,7 +1047,7 @@ export function installXColumns(options: {
   }
   /** Escape closes details unless a viewer, dialog, menu or editor is using it. */
   function closeOnEscape(event: KeyboardEvent) {
-    if (!panel || !selected || event.key !== 'Escape' || event.defaultPrevented || event.isComposing ||
+    if (document.fullscreenElement || !panel || !selected || event.key !== 'Escape' || event.defaultPrevented || event.isComposing ||
       event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !active()) return;
     const target = event.target && (event.target as Element).nodeType === 1 ? event.target as Element : undefined;
     if (target?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"],[role="menu"],[role="listbox"],dialog')) return;
