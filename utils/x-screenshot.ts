@@ -260,29 +260,41 @@ function removeCaptureRows(article: HTMLElement, hideMetrics: boolean) {
   return rows.size > 0;
 }
 
-function fitCapture(xml: Document, article: HTMLElement, doc: Document) {
-  // Measure the serialized, styled article, isolated from X's stylesheet and
-  // mutation handlers. The sandbox disables scripts and the CSP permits only
-  // resources already embedded by html-to-image.
-  const frame = doc.createElement('iframe');
-  frame.setAttribute('sandbox','allow-same-origin'); frame.inert = true;
-  frame.style.cssText = 'position:fixed;left:-100000px;top:0;visibility:hidden;border:0;pointer-events:none';
-  frame.style.width = xml.documentElement.getAttribute('width') + 'px';
-  doc.body.append(frame);
-  try {
-    const layout = frame.contentDocument!;
-    const policy = layout.createElement('meta'); policy.httpEquiv = 'Content-Security-Policy';
-    policy.content = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:";
-    layout.head.append(policy);
-    const copy = layout.importNode(article,true);
-    layout.body.style.margin = '0'; layout.body.append(copy);
-    const height = Math.ceil(copy.getBoundingClientRect().height);
-    if (height > 0) {
-      const svg = xml.documentElement;
-      svg.setAttribute('height',String(height));
-      svg.setAttribute('viewBox',`0 0 ${svg.getAttribute('width')} ${height}`);
-    }
-  } finally { frame.remove(); }
+async function fitCapture(xml: Document, doc: Document) {
+  const svg = xml.documentElement;
+  const width = Number(svg.getAttribute('width'));
+  const height = Number(svg.getAttribute('height'));
+  if (!width || !height) return;
+
+  // Lay out the serialized article in SVG image mode, where scripts are inert.
+  // Render just its first pixel column. A marker after the invisible article
+  // gives its bottom edge without inserting captured markup into a live frame.
+  const probe = svg.cloneNode(true) as SVGSVGElement;
+  const content = probe.querySelector('foreignObject')!;
+  content.setAttribute('width', String(width));
+  probe.setAttribute('width', '1');
+  probe.setAttribute('height', String(height + 2));
+  probe.setAttribute('viewBox', `0 0 1 ${height + 2}`);
+  (content.firstElementChild as HTMLElement).style.opacity = '0';
+  const marker = xml.createElementNS('http://www.w3.org/1999/xhtml', 'div');
+  marker.style.cssText = 'display:block;width:1px;height:2px;background:black';
+  content.append(marker);
+  const image = doc.createElement('img');
+  image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(probe));
+  await image.decode();
+  const canvas = doc.createElement('canvas');
+  canvas.width = 1;
+  canvas.height = height + 2;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(image, 0, 0);
+  const pixels = ctx.getImageData(0, 0, 1, canvas.height).data;
+  for (let y = 1; y <= height; y++) {
+    if (pixels[y * 4 + 3] !== 255) continue;
+    svg.setAttribute('height', String(y));
+    svg.setAttribute('viewBox', `0 0 ${width} ${y}`);
+    return;
+  }
 }
 
 export async function screenshotSvg(post: HTMLElement, options: ScreenshotOptions, backgroundColor: string) {
@@ -306,7 +318,7 @@ export async function screenshotSvg(post: HTMLElement, options: ScreenshotOption
   const xml = new DOMParser().parseFromString(decodeURIComponent(svg.slice(svg.indexOf(',') + 1)), 'image/svg+xml');
   const article = xml.querySelector<HTMLElement>('foreignObject > *')!;
   await addVideoStills(xml,players);
-  if (removeCaptureRows(article,Boolean(options.hideMetrics))) fitCapture(xml,article,post.ownerDocument);
+  if (removeCaptureRows(article,Boolean(options.hideMetrics))) await fitCapture(xml,post.ownerDocument);
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(xml));
 }
 
