@@ -202,6 +202,15 @@ test('interactive controls, profiles, media and modified clicks keep native beha
   assert.equal(document.querySelector('iframe'), null);
 });
 
+function liftable(element: HTMLElement) {
+  let open = false;
+  element.showPopover = () => { open = true; };
+  element.hidePopover = () => { open = false; };
+  const matches = element.matches.bind(element);
+  element.matches = (selector: string) => selector === ':popover-open' ? open : matches(selector);
+}
+const lifted = (element: Element) => element.matches(':popover-open');
+
 function addVideo(doc = document) {
   const player = doc.createElement('div');
   player.dataset.testid = 'videoPlayer';
@@ -213,14 +222,10 @@ function addVideo(doc = document) {
   Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
   video.pause = () => { paused = true; pauses++; };
   const play = () => { paused = false; video.dispatchEvent(new win.Event('play') as unknown as Event); };
-  player.requestFullscreen = async () => {
-    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, value: player });
-    doc.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
-  };
-  doc.exitFullscreen = async () => {
-    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, value: null });
-    doc.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
-  };
+  // The viewer fills the tab in place; it must never use the Fullscreen API.
+  player.requestFullscreen = async () => { throw new Error('unexpected requestFullscreen'); };
+  // happy-dom does not implement the top layer; track the lift for assertions.
+  liftable(player);
   return { player, video, play, pauses: () => pauses };
 }
 
@@ -324,10 +329,12 @@ test('video expansion keeps the original node and source, then restores focus an
   assert.equal(video.src, 'blob:https://x.com/existing-stream');
   assert.equal(video.paused, false);
   await Promise.resolve();
-  assert.equal(document.fullscreenElement, player);
+  assert.equal(document.fullscreenElement ?? null, null);
+  assert.equal(lifted(player), true);
   assert.equal(button.getAttribute('aria-expanded'), 'true');
-  await document.exitFullscreen();
-  assert.equal(document.fullscreenElement, null);
+  viewerKey('Escape');
+  assert.equal(lifted(player), false);
+  assert.equal(player.hasAttribute('popover'), false);
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
   assert.equal(document.querySelector<HTMLElement>('#site-enhancer-columns')!.inert, false);
   assert.equal(document.activeElement, button);
@@ -337,7 +344,35 @@ test('video expansion keeps the original node and source, then restores focus an
   assert.equal(player.querySelector('button'), null);
 });
 
-test('mixed viewer requests the next fullscreen surface before releasing the old one', async () => {
+test('Readomi captions stack above the lifted player and are released on close', async () => {
+  const { player } = addVideo();
+  const early = document.createElement('div');
+  early.setAttribute('data-readomi-subtitles', '');
+  liftable(early);
+  document.documentElement.append(early);
+  start();
+  click('[data-site-enhancer-video-expand]');
+  await Promise.resolve();
+  assert.equal(lifted(player), true);
+  assert.equal(lifted(early), true);
+  // Readomi can mount its caption layer after playback starts.
+  const late = document.createElement('div');
+  late.setAttribute('data-readomi-subtitles', '');
+  liftable(late);
+  document.documentElement.append(late);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lifted(late), true);
+  assert.ok(document.getElementById('site-enhancer-media-top-style'));
+  viewerKey('Escape');
+  for (const caption of [early, late]) {
+    assert.equal(lifted(caption), false);
+    assert.equal(caption.hasAttribute('popover'), false);
+    assert.equal(caption.parentElement, document.documentElement);
+  }
+  early.remove(); late.remove();
+});
+
+test('mixed viewer switches between the lifted player and the image dialog in place', async () => {
   const { player, video } = addVideo();
   player.insertAdjacentHTML('beforebegin', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/one"></div>');
   player.insertAdjacentHTML('afterend', '<div role="link"><div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/quote"></div></div>');
@@ -345,28 +380,23 @@ test('mixed viewer requests the next fullscreen surface before releasing the old
   await Promise.resolve();
   assert.equal(player.querySelector('.se-image-count')?.textContent, '2 / 2');
   assert.ok(player.querySelector('.se-image-count svg'));
+  assert.equal(lifted(player), true);
   const header = player.querySelector('header')!;
-  const host = document.querySelector('dialog')!.parentElement!;
-  const exits: Element[] = [];
-  const originalExit = document.exitFullscreen;
-  document.exitFullscreen = async () => { exits.push(document.fullscreenElement!); await originalExit(); };
-  host.requestFullscreen = async () => {
-    assert.equal(document.fullscreenElement, player);
-    assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
-    Object.defineProperty(document,'fullscreenElement',{configurable:true,value:host});
-    document.dispatchEvent(new win.Event('fullscreenchange') as unknown as Event);
-  };
+  const dialog = document.querySelector('dialog')!;
   viewerKey('Home'); await Promise.resolve();
-  assert.equal(document.fullscreenElement, host);
+  assert.equal(lifted(player), false);
+  assert.equal(dialog.open, true);
   assert.equal(video.paused, true);
   assert.equal(document.querySelector('dialog header'), header);
   assert.equal(header.querySelector('.se-image-count')?.textContent, '1 / 2');
   viewerKey('ArrowDown'); await Promise.resolve();
-  assert.equal(document.fullscreenElement,player);
+  assert.equal(lifted(player), true);
+  assert.equal(dialog.open, false);
   assert.equal(player.querySelector('header'),header);
-  assert.deepEqual(exits,[]);
   viewerKey('Escape'); await Promise.resolve();
-  assert.deepEqual(exits,[player]);
+  assert.equal(lifted(player), false);
+  assert.equal(document.querySelector('dialog'), null);
+  assert.equal(document.fullscreenElement ?? null, null);
 });
 
 test('speed popover, wheel, keyboard presets and replacement video share the remembered rate', async () => {
@@ -433,7 +463,7 @@ test('viewer sliders capture a drag, own navigation keys and share the chosen vo
     key(volume,k); assert.equal(volume.getAttribute('aria-valuenow'),String(expected));
     assert.equal(video.muted,expected === 0);
   }
-  assert.equal(document.fullscreenElement,player);
+  assert.equal(lifted(player), true);
 });
 
 test('surface and PiP buttons operate on the original video and release the PiP override', async () => {
@@ -524,28 +554,28 @@ test('native video destinations respect mixed media order, quoted posts and expl
   assert.equal(nativeVideoUrl(linked), 'https://x.com/alice/status/123/video/3');
 });
 
-test('a denied fullscreen request falls back in place and can be reopened in fullscreen', async () => {
+test('a player without popover support still expands in place and can be reopened', async () => {
   const { player } = addVideo();
-  const allow = player.requestFullscreen;
-  player.requestFullscreen = async () => { throw new TypeError('Fullscreen denied'); };
+  (player as { showPopover?: unknown }).showPopover = undefined;
   start();
   click('[data-site-enhancer-video-expand]');
   await Promise.resolve();
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
+  assert.equal(player.hasAttribute('popover'), false);
   assert.ok(player.querySelector('.se-video-chrome'));
   viewerKey('Escape');
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
-  player.requestFullscreen = allow;
   click('[data-site-enhancer-video-expand]');
   await Promise.resolve();
-  assert.equal(document.fullscreenElement, player);
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), true);
 });
 
-test('detail fullscreen keeps the live player and selection, and cached hidden details cannot autoplay', async t => {
+test('detail full screen covers the tab in place, keeps the live player and selection, and cached hidden details cannot autoplay', async t => {
   start();
   const frame = selectDetail(123);
   const detail = attachReadyDetail(t, frame, 'https://x.com/alice/status/123');
+  Object.defineProperty(detail, 'frameElement', { configurable: true, value: frame });
+  liftable(frame);
   const doc = detail.document as unknown as Document;
   const { player, video, play } = addVideo(doc);
   signalDetail(detail);
@@ -556,12 +586,17 @@ test('detail fullscreen keeps the live player and selection, and cached hidden d
   assert.equal(button.title, '全屏观看');
   button.click();
   await Promise.resolve();
-  assert.equal(doc.fullscreenElement, player);
+  assert.equal(lifted(player), true);
+  assert.equal(frame.hasAttribute('data-site-enhancer-media-frame'), true);
+  assert.equal(lifted(frame), true);
   assert.equal(player.querySelector('video'), video);
   assert.equal(video.currentTime, 37);
   assert.equal(video.src, 'blob:https://x.com/detail-stream');
-  await doc.exitFullscreen();
+  doc.querySelector('dialog')!.dispatchEvent(new detail.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }) as unknown as Event);
   assert.equal(player.hasAttribute('data-site-enhancer-video-expanded'), false);
+  assert.equal(frame.hasAttribute('data-site-enhancer-media-frame'), false);
+  assert.equal(frame.hasAttribute('popover'), false);
+  assert.equal(lifted(frame), false);
   assert.equal(detail.document.activeElement, button);
   assert.equal(document.querySelector('iframe:not([hidden])'), frame);
   assert.equal(navigate.mock.callCount(), 0);
@@ -587,7 +622,7 @@ test('browsing a detail photo to its video stays in the gallery', async t => {
   assert.equal(gallery.querySelector('.se-image-count')?.textContent, '1 / 2');
   gallery.querySelector('button[data-direction=next]')!.dispatchEvent(new detail.MouseEvent('click', { bubbles: true }));
   await Promise.resolve();
-  assert.equal(doc.fullscreenElement, player);
+  assert.equal(lifted(player), true);
   assert.equal(player.querySelector('video'), video);
   assert.equal(player.querySelector('.se-image-count')?.textContent, '2 / 2');
   assert.equal(navigate.mock.callCount(), 0);

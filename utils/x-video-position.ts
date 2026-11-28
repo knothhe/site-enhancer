@@ -1,4 +1,4 @@
-// One explicit subtitle navigation per tab. Blob/MediaSource URLs change on reload,
+// One explicit subtitle handoff to a new tab. Blob/MediaSource URLs change on reload,
 // so identify the video by X's post ID and attachment number.
 const KEY = 'site-enhancer:x-subtitle-video-position';
 const TTL = 2 * 60_000;
@@ -14,7 +14,7 @@ function target(url: string) {
 export function saveVideoPosition(url: string, time: number) {
   try {
     if (target(url) && Number.isFinite(time) && time >= 0) {
-      window.sessionStorage.setItem(KEY, JSON.stringify({ url, time, expires: Date.now() + TTL }));
+      window.localStorage.setItem(KEY, JSON.stringify({ url, time, expires: Date.now() + TTL }));
     }
   } catch { /* The subtitle navigation still works if storage is disabled. */ }
 }
@@ -23,12 +23,12 @@ export function restoreVideoPosition(videoUrl: (video: HTMLVideoElement) => stri
   let raw: string | null;
   let saved: { url: string; time: number; expires: number };
   try {
-    raw = window.sessionStorage.getItem(KEY);
+    raw = window.localStorage.getItem(KEY);
     if (!raw) return;
     saved = JSON.parse(raw);
     if (!saved || typeof saved.url !== 'string' || !Number.isFinite(saved.time) || saved.time < 0 ||
       !Number.isFinite(saved.expires) || saved.expires <= Date.now()) {
-      window.sessionStorage.removeItem(KEY);
+      window.localStorage.removeItem(KEY);
       return;
     }
   } catch { return; }
@@ -62,7 +62,7 @@ export function restoreVideoPosition(videoUrl: (video: HTMLVideoElement) => stri
   function clear() {
     stop();
     try {
-      if (window.sessionStorage.getItem(KEY) === raw) window.sessionStorage.removeItem(KEY);
+      if (window.localStorage.getItem(KEY) === raw) window.localStorage.removeItem(KEY);
     } catch { /* Optional storage. */ }
   }
   function check() {

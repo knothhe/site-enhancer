@@ -60,6 +60,85 @@ const ICONS = {
   download: 'M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2',
   rotate: 'M21 12a9 9 0 1 1-3-6.7L21 8m0-5v5h-5',
 };
+const CAPTIONS = '[data-readomi-subtitles]';
+const FRAME_ATTR = 'data-site-enhancer-media-frame';
+const TOP_CSS = `
+${CAPTIONS}[popover]{inset:auto;margin:0;border:0;padding:0;background:transparent;color:inherit;overflow:visible;height:auto}
+html:has([data-site-enhancer-video-expanded]:not([data-se-idle])) ${CAPTIONS}[popover]{translate:0 -96px}
+${CAPTIONS}[popover]{transition:translate 200ms}
+@media(prefers-reduced-motion:reduce){${CAPTIONS}[popover]{transition:none}}
+iframe[${FRAME_ATTR}]{position:fixed!important;inset:0!important;width:100vw!important;height:100dvh!important;max-width:none!important;max-height:none!important;margin:0!important;padding:0!important;border:0!important;z-index:2147483645!important;background:#101318!important;visibility:visible!important;opacity:1!important}
+`;
+
+function topStyle() {
+  if (document.getElementById('site-enhancer-media-top-style')) return;
+  const style = document.createElement('style');
+  style.id = 'site-enhancer-media-top-style';
+  style.textContent = TOP_CSS;
+  (document.head ?? document.documentElement).append(style);
+}
+
+function promote(element: HTMLElement, owned: Set<HTMLElement>) {
+  if (!element.showPopover) return;
+  if (!element.hasAttribute('popover')) { element.setAttribute('popover', 'manual'); owned.add(element); }
+  try {
+    if (element.matches(':popover-open')) element.hidePopover();
+    element.showPopover();
+  } catch { /* Readomi may have just moved or removed it. */ }
+}
+
+/** Readomi mounts top-document captions on <html> (or the fullscreen element). The lifted
+ * player sits in the top layer, so stack its caption layer above it while the viewer is open. */
+function stackCaptions(doc: Document) {
+  const owned = new Set<HTMLElement>();
+  let observer: MutationObserver | undefined;
+  return {
+    raise() {
+      // Readomi only runs in the top-level document.
+      if (doc !== document) return;
+      topStyle();
+      doc.querySelectorAll<HTMLElement>(CAPTIONS).forEach(element => promote(element, owned));
+      observer ??= new MutationObserver(records => {
+        for (const record of records) for (const node of record.addedNodes) {
+          if (node.nodeType === 1 && (node as HTMLElement).matches(CAPTIONS)) promote(node as HTMLElement, owned);
+        }
+      });
+      observer.observe(doc.documentElement, { childList: true });
+    },
+    dispose() {
+      observer?.disconnect();
+      for (const element of owned) {
+        try { if (element.matches(':popover-open')) element.hidePopover(); } catch { /* Detached. */ }
+        element.removeAttribute('popover');
+      }
+      owned.clear();
+    },
+  };
+}
+
+/** A detail-pane viewer can only paint inside its iframe, so grow the iframe to the tab's
+ * viewport while it is open. Restyling never reloads the frame or the timeline. */
+function coverFrame(doc: Document) {
+  const frame = (doc === document ? null : doc.defaultView?.frameElement) as HTMLElement | null | undefined;
+  if (!frame || frame.nodeType !== 1 || frame.ownerDocument !== document) return { dispose() {} };
+  topStyle();
+  frame.setAttribute(FRAME_ATTR, '');
+  let lifted = false;
+  if (frame.showPopover && !frame.hasAttribute('popover')) {
+    frame.setAttribute('popover', 'manual');
+    try { frame.showPopover(); lifted = true; } catch { frame.removeAttribute('popover'); }
+  }
+  return {
+    dispose() {
+      if (lifted) {
+        try { if (frame.matches(':popover-open')) frame.hidePopover(); } catch { /* Detached. */ }
+        frame.removeAttribute('popover');
+      }
+      frame.removeAttribute(FRAME_ATTR);
+    },
+  };
+}
+
 /** One active viewer shared by timeline and same-origin detail documents. */
 export function createMediaViewer(options: {
   speed(player: HTMLElement): SpeedControl | undefined;
@@ -84,19 +163,20 @@ export function createMediaViewer(options: {
   function open(items: MediaItem[], index: number, trigger: HTMLElement) {
     close();
     restoreFocus = trigger;
-    // Keep the fullscreen host, live player and its controls in one fullscreen stack.
-    // Photo-only galleries can still cover the timeline using the top-level dialog.
+    // Keep the live player and its controls in the player's own document. Photo-only
+    // galleries cover the whole tab using the top-level dialog.
     const doc = items.some(item => 'player' in item) ? trigger.ownerDocument : document;
     const view = doc.defaultView!;
     const frameGallery = doc !== document;
+    const frameCover = coverFrame(doc);
+    const captionLayer = stackCaptions(doc);
     const scroll = [view.scrollX, view.scrollY] as const;
     function imageAt(i: number) {
       const item = items[i];
       return item && 'image' in item ? item.image : undefined;
     }
     const mixed = items.some(item => 'image' in item) && items.some(item => 'player' in item);
-    // The Fullscreen API rejects HTMLDialogElement. Fullscreen its container and
-    // show the dialog non-modally inside it when coming from a fullscreen player.
+    // Media fill the browser viewport using the top layer, never the Fullscreen API.
     const host = doc.createElement('div');
     const videoChrome = doc.createElement('div');
     videoChrome.tabIndex = -1;
@@ -105,12 +185,9 @@ export function createMediaViewer(options: {
     let player: HTMLElement | undefined;
     let videoBar: ReturnType<typeof mountVideoBar> | undefined;
     let speed: SpeedControl | undefined;
-    let fullscreen = false;
-    let switching = 0, sequence = 0;
     let lifted: HTMLElement | undefined;
     const overflow = doc.documentElement.style.overflow;
     doc.documentElement.style.overflow = 'hidden';
-    const owned = new Set<Element>([host]);
     const zh = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
     const current = doc.createElement('dialog');
     dialog = current;
@@ -444,16 +521,6 @@ export function createMediaViewer(options: {
       player.querySelector('[data-site-enhancer-video-expand]')?.setAttribute('aria-expanded','false');
       player = undefined;
     }
-    function fullscreenChange() {
-      if (!switching && fullscreen && doc.fullscreenElement !== (player ?? host)) close();
-    }
-    async function exitOwned() {
-      while (doc.fullscreenElement && owned.has(doc.fullscreenElement)) {
-        const before = doc.fullscreenElement;
-        try { await doc.exitFullscreen(); } catch { break; }
-        if (doc.fullscreenElement === before) break;
-      }
-    }
     refreshControls = target => {
       if (target !== player) return;
       if (videoChrome.parentElement !== target) target.append(videoChrome);
@@ -468,15 +535,6 @@ export function createMediaViewer(options: {
     function present(nextPlayer?: HTMLElement) {
       const outgoing = player?.querySelector('video') ?? (loaded ? img : preview);
       const still = generation > 1 ? transitionStill(outgoing) : undefined;
-      const wantsFullscreen = frameGallery || nextPlayer || fullscreen || switching || doc.fullscreenElement;
-      const token = switching = ++sequence;
-      const destination = nextPlayer ?? host;
-      owned.add(destination);
-      let request: Promise<void> | undefined;
-      if (wantsFullscreen && doc.fullscreenElement !== destination) {
-        try { request = destination.requestFullscreen?.(); }
-        catch { /* Use the modal or fixed player. */ }
-      }
       releasePlayer();
       player = nextPlayer;
       // While an image in a mixed post is open, refuse X's attempts to restart
@@ -488,16 +546,19 @@ export function createMediaViewer(options: {
         if (current.open) current.close();
         player.setAttribute('data-site-enhancer-video-expanded','');
         player.querySelector('[data-site-enhancer-video-expand]')?.setAttribute('aria-expanded','true');
+        // Transformed timeline ancestors can clip a fixed player. Lift it in place.
+        if (player.showPopover) {
+          player.setAttribute('popover','manual');
+          try { player.showPopover(); lifted = player; } catch { player.removeAttribute('popover'); }
+        }
         videoChrome.append(toolbar, sidePrevious, sideNext, shortcuts);
         refreshControls?.(player);
         videoChrome.focus({ preventScroll:true });
+        captionLayer.raise();
       } else {
         current.prepend(toolbar); current.append(sidePrevious,sideNext,shortcuts);
         videoChrome.remove();
-        if (!current.open) {
-          if (request || doc.fullscreenElement === host) current.show();
-          else current.showModal();
-        }
+        if (!current.open) current.showModal();
       }
       if (still?.animate) {
         (nextPlayer ?? current).append(still);
@@ -507,30 +568,6 @@ export function createMediaViewer(options: {
         // A video can still be buffering with no frame available to snapshot.
         (nextPlayer ?? viewport).animate?.([{ opacity: 0 }, { opacity: 1 }], 120);
       }
-      function fallback() {
-        // Transformed timeline ancestors can clip a fixed player. Lift it in place.
-        if (player && !player.hasAttribute('popover') && player.showPopover) {
-          player.setAttribute('popover','manual');
-          try { player.showPopover(); lifted = player; } catch { player.removeAttribute('popover'); }
-        } else if (!player) { current.close(); current.showModal(); }
-      }
-      if (!request) {
-        switching = 0; fullscreen = doc.fullscreenElement === destination;
-        if (!fullscreen && nextPlayer) fallback();
-        return;
-      }
-      void request.then(() => {
-        if (disposed) { if (!dialog) void exitOwned(); return; }
-        if (token !== switching) return;
-        switching = 0; fullscreen = doc.fullscreenElement === destination;
-      }, async () => {
-        if (disposed || token !== switching) return;
-        fullscreen = false;
-        await exitOwned();
-        if (disposed || token !== switching) return;
-        switching = 0;
-        fallback();
-      });
     }
     function show(value: number, fromSwipe = false) {
       copyController?.abort(); copyController = undefined;
@@ -771,7 +808,6 @@ export function createMediaViewer(options: {
     current.append(style, toolbar, viewport, sidePrevious, sideNext, copyStatus, help, shortcuts);
     current.addEventListener('cancel', event => { event.preventDefault(); close(); });
     host.append(current); doc.body.append(host);
-    doc.addEventListener('fullscreenchange',fullscreenChange);
     let holdTimer = 0, pendingSpeed = false;
     function releaseSpeed() {
       window.clearTimeout(holdTimer); pendingSpeed = false; speed?.hold(false);
@@ -866,9 +902,8 @@ export function createMediaViewer(options: {
     window.addEventListener('blur', blur);
     disposeOpenView = () => {
       disposed = true;
-      doc.removeEventListener('fullscreenchange', fullscreenChange);
       releasePlayer(); options.activate(undefined); videoChrome.remove();
-      void exitOwned(); host.remove();
+      host.remove(); captionLayer.dispose(); frameCover.dispose();
       doc.documentElement.style.overflow = overflow;
       view.scrollTo(...scroll);
       windows.forEach(source => source.removeEventListener('keyup', keyup, true));

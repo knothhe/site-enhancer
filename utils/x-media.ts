@@ -42,8 +42,8 @@ export function installXMedia(options: {
   let expanded: HTMLElement | undefined;
   const speeds = new WeakMap<HTMLElement, SpeedControl>();
   const labels = () => resolveLocale(document.documentElement.lang || navigator.language) === 'zh'
-    ? { subtitlePost: '在帖子页打开（字幕扩展）', expand: '全屏观看' }
-    : { subtitlePost: 'Open post page (for subtitles)', expand: 'Full screen' };
+    ? { subtitlePost: '在新标签页打开（字幕扩展）', expand: '全屏观看' }
+    : { subtitlePost: 'Open in new tab (for subtitles)', expand: 'Full screen' };
 
   function blocked(doc: Document) {
     return doc === document ? feedPaused : !!documents.get(doc)?.frame?.hidden;
@@ -62,8 +62,10 @@ export function installXMedia(options: {
         if (blocked(video.ownerDocument)) return;
         const url = options.nativeVideoUrl?.(video);
         if (!url) return;
+        // Never navigate this tab: reloading X would discard the timeline and its history.
         saveVideoPosition(url, video.currentTime);
-        window.location.assign(url);
+        video.pause();
+        window.open(url, '_blank', 'noopener');
       },
     },
     toggleMute: playback.toggleMute,
