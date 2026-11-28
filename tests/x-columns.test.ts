@@ -36,7 +36,7 @@ test('X layer overlays lift the app root above the fixed detail panel only while
   const lift = COLUMNS_CSS.split('\n').find(line => !line.startsWith('/*') && line.includes('#layers') && line.includes('z-index'))!;
   const selector = lift.slice(0, lift.indexOf('{')).replace(':root[data-site-enhancer-columns] ', '');
   const panelZ = Number(/#site-enhancer-columns\{[^}]*z-index:(\d+)/.exec(COLUMNS_CSS)![1]);
-  const toggleZ = Number(/#site-enhancer-nav-toggle\{[^}]*z-index:(\d+)/.exec(COLUMNS_CSS)![1]);
+  const toggleZ = Number(/\.se-rail-button\{[^}]*z-index:(\d+)/.exec(COLUMNS_CSS)![1]);
   assert.ok(Number(/z-index:(\d+)/.exec(lift)![1]) > Math.max(panelZ, toggleZ));
   // happy-dom mis-evaluates descendant combinators inside :has(), so the live match is verified in Chrome.
   assert.match(selector, /^#react-root>div:has\(>div>#layers :is\(/);
@@ -56,31 +56,85 @@ test('divider rules reserve the hairline for dragging and use a hidden grip at r
   assert.equal(divider.style.getPropertyValue('--se-grip-y'), '237px');
 });
 
-test('posts have inset separators in each pane and a rounded selection tint', () => {
+test('both panes inset cell borders and the empty separator immediately after composer progress', () => {
+  document.documentElement.setAttribute('data-site-enhancer-columns', '');
+  const primary = document.querySelector('[data-testid="primaryColumn"]')!;
+  primary.innerHTML = `
+    <div id="compose"><div data-testid="tweetTextarea_0"></div><div id="tools"><button data-testid="tweetButtonInline"></button></div></div>
+    <div><div role="progressbar"><div data-testid="progressBar-bar"></div></div></div>
+    <div id="separator" style="background-color:rgb(239,243,244);height:1px"></div><div id="unrelated"></div>
+    <div data-testid="cellInnerDiv"><div id="post"><article><div id="quote"></div></article></div></div>
+    <div data-testid="cellInnerDiv"><div id="module">Show probable spam</div></div>`;
   for (const css of [COLUMNS_CSS, DETAIL_FRAME_CSS]) {
-    assert.match(css, /cellInnerDiv[^{}]+>div\{border-bottom-color:transparent[^}]+calc\(100% - 32px\) 1px/);
+    const selectorFor = (marker: string) => css.split('\n').find(rule => rule.includes(marker))!.split('{')[0];
+    const cells = selectorFor('[data-testid="cellInnerDiv"]>div');
+    assert.deepEqual(Array.from(document.querySelectorAll(cells), el => el.id), ['post', 'module']);
+    assert.ok(css.includes(cells + '{border-bottom-color:transparent'));
+    assert.match(css, /background-size:calc\(100% - 32px\) 1px/);
+    const compose = selectorFor('progressBar-bar');
+    assert.deepEqual(Array.from(document.querySelectorAll(compose), el => el.id), ['separator']);
+    assert.ok(css.includes(compose + '{margin-inline:16px!important;width:calc(100% - 32px)!important;background-color:var(--se-column-line)'));
   }
-  const selected = COLUMNS_CSS.split('\n').find(line => line.includes('[data-site-enhancer-selected]'))!;
-  assert.match(selected, /border-radius:12px/);
-  assert.match(selected, /background-color:color-mix/);
-  assert.doesNotMatch(selected, /box-shadow/);
 });
 
-test('empty toolbar shows title and layout, with history buttons shown together after selection', () => {
-  start();
-  const toolbar = document.querySelector('.se-column-toolbar')!;
-  const visible = () => Array.from(toolbar.children).filter(el => !(el as HTMLElement).hidden);
-  const titleAndLayout = [toolbar.querySelector('.se-column-title'), toolbar.querySelector('[aria-haspopup="dialog"]')];
-  assert.deepEqual(visible(), titleAndLayout);
-  const back = toolbar.querySelector<HTMLButtonElement>('[aria-label="后退"]')!;
-  const forward = toolbar.querySelector<HTMLButtonElement>('[aria-label="前进"]')!;
-  assert.ok(back.disabled && forward.disabled);
+test('only outer timeline posts and navigable detail replies get the inset hover', () => {
+  for (const css of [COLUMNS_CSS, DETAIL_FRAME_CSS]) {
+    const rule = css.split('\n').find(line => line.includes('{position:relative;isolation:isolate;background-color:transparent!important}'))!;
+    const post = rule.split('{')[0];
+    // happy-dom cannot match complex selectors in :not(); exercise the generated CSS contract here.
+    assert.ok(post.includes('[data-testid="primaryColumn"] article[data-testid="tweet"]:not(article article)'));
+    if (css === DETAIL_FRAME_CSS) {
+      assert.ok(post.includes(':not(article article)[tabindex="0"]'));
+      assert.ok(post.includes('[role="link"][data-href]>article:not(article article)'));
+    }
+    assert.ok(css.includes(post + '::before{content:"";position:absolute;inset:2px 6px;border-radius:12px;pointer-events:none;z-index:-1;opacity:0'));
+    assert.ok(css.includes(post + ':hover::before{opacity:1;transition:opacity 120ms 120ms}'));
+    assert.ok(css.includes('@media(prefers-reduced-motion:reduce){' + post + ':hover::before{transition:none}}'));
+    if (css === COLUMNS_CSS) assert.ok(css.includes(post + '[data-site-enhancer-selected]::before{opacity:1;transition:none;background-color:color-mix'));
+  }
+});
+
+test('empty state hides the toolbar and keeps Layout beside the rail toggle', () => {
+  const instance = start();
+  const toolbar = document.querySelector<HTMLElement>('.se-column-toolbar')!;
+  const layout = document.querySelector<HTMLButtonElement>('#site-enhancer-layout-trigger')!;
+  assert.ok(toolbar.hidden);
+  assert.equal(layout.parentElement, document.body);
+  assert.equal(layout.nextElementSibling?.id, 'site-enhancer-nav-toggle');
+  assert.ok(!toolbar.contains(layout));
+  assert.equal(layout.getAttribute('aria-label'), '布局');
   selectDetail(123);
-  assert.equal(visible().length, 7);
-  assert.equal(back.disabled, false);
-  assert.equal(forward.disabled, true);
+  assert.ok(!toolbar.hidden);
+  const labels = (el: Element) => Array.from(el.children, button => button.getAttribute('aria-label'));
+  assert.deepEqual(labels(toolbar.children[1]), ['后退', '前进']);
+  assert.deepEqual(labels(toolbar.children[2]), ['复制链接', '新标签页']);
+  assert.equal(toolbar.lastElementChild?.getAttribute('aria-label'), '关闭');
   click('.se-column-toolbar [aria-label="关闭"]');
-  assert.deepEqual(visible(), titleAndLayout);
+  assert.ok(toolbar.hidden);
+  layout.click();
+  assert.equal(document.getElementById('site-enhancer-layout-menu')?.parentElement, document.body);
+  instance.setEnabled(false);
+  assert.ok(!layout.isConnected && !document.getElementById('site-enhancer-layout-menu'));
+});
+
+test('first-load skeleton announces the loading status and yields to the ready frame', async t => {
+  start();
+  const frame = selectDetail(123);
+  const status = document.querySelector<HTMLElement>('[role="status"][data-state="loading"]')!;
+  assert.ok(!status.hidden);
+  assert.equal(status.textContent, '正在加载详情…');
+  assert.equal(status.querySelector('.se-post-skeleton')?.getAttribute('aria-hidden'), 'true');
+  assert.equal(status.querySelectorAll('.se-skeleton-line').length, 3);
+  assert.ok(status.querySelector('.se-skeleton-media'));
+  document.documentElement.lang = 'en';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(status.textContent, 'Loading post…');
+  const view = attachReadyDetail(t, frame, frame.src);
+  signalDetail(view);
+  assert.ok(status.hidden);
+  click('#site-enhancer-layout-trigger');
+  view.document.body.click();
+  assert.equal(document.querySelector('#site-enhancer-layout-menu'), null);
 });
 
 test('feed scroll state follows the viewport and pending updates are cancelled on unmount', async t => {
@@ -954,6 +1008,51 @@ test('detail toolbar follows the measured native header and releases its alignme
   assert.equal(header.hasAttribute('data-site-enhancer-column-header'), false);
   assert.equal(document.documentElement.style.getPropertyValue('--se-column-header-height'), '');
 });
+
+for (const xweb of [false, true]) {
+  test(`empty search aligns after streaming, resize and reopening (${xweb ? 'x-web' : 'responsive-web'})`, async () => {
+    if (xweb) {
+      document.documentElement.setAttribute('data-app-env', 'test');
+      document.documentElement.setAttribute('data-app-version', 'fixture');
+    }
+    const header = document.createElement('header');
+    header.setAttribute('data-page-header', '');
+    let height = 54;
+    header.getBoundingClientRect = () => ({ top: 0, height } as DOMRect);
+    document.querySelector('[data-testid="primaryColumn"]')!.prepend(header);
+    const controller = start();
+    await win.happyDOM.waitUntilComplete();
+    const sidebar = document.createElement(xweb ? 'aside' : 'div');
+    if (!xweb) sidebar.dataset.testid = 'sidebarColumn';
+    sidebar.innerHTML = '<div><form role="search"></form></div>';
+    const form = sidebar.querySelector('form')!;
+    const offset = () => parseFloat(document.documentElement.style.getPropertyValue('--se-search-offset')) || 0;
+    let nativeTop = 19.5;
+    form.getBoundingClientRect = () => ({ top: nativeTop + offset(), height: 44 } as DOMRect);
+    document.querySelector('main')!.after(sidebar);
+    await win.happyDOM.waitUntilComplete();
+    assert.equal(form.getBoundingClientRect().top + 22, height / 2);
+    const initialOffset = offset();
+    sidebar.scrollTop = 80;
+    nativeTop = 28;
+    win.dispatchEvent(new win.Event('resize'));
+    await win.happyDOM.waitUntilComplete();
+    assert.equal(offset(), initialOffset, 'a scrolled sticky form is not a layout measurement');
+    sidebar.scrollTop = 0;
+    sidebar.dispatchEvent(new win.Event('scrollend') as unknown as Event);
+    await win.happyDOM.waitUntilComplete();
+    assert.equal(form.getBoundingClientRect().top + 22, height / 2);
+    selectDetail(123);
+    nativeTop = 24;
+    height = 64;
+    click('.se-column-toolbar [aria-label="关闭"]');
+    controller.onNavigate();
+    await win.happyDOM.waitUntilComplete();
+    assert.equal(form.getBoundingClientRect().top + 22, height / 2);
+    controller.setEnabled(false);
+    assert.equal(offset(), 0);
+  });
+}
 
 test('loading and updating the timeline does not rediscover the header until it appears', async t => {
   const primary = document.querySelector('[data-testid="primaryColumn"]')!;

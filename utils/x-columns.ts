@@ -105,6 +105,19 @@ export function nativeVideoUrl(video: HTMLVideoElement, detailPost?: string) {
 
 // Paint in the transparent bottom border so opaque post content cannot cover the rule.
 const insetLine = `border-bottom-color:transparent!important;background-image:linear-gradient(var(--se-column-line),var(--se-column-line))!important;background-size:calc(100% - 32px) 1px!important;background-position:center bottom!important;background-repeat:no-repeat!important;background-origin:border-box!important;background-clip:border-box!important`;
+const composeSeparator = '[data-testid="primaryColumn"] :has([data-testid="progressBar-bar"]) + div:empty';
+const separatorStyle = 'margin-inline:16px!important;width:calc(100% - 32px)!important;background-color:var(--se-column-line)!important';
+const outerTweet = 'article[data-testid="tweet"]:not(article article)';
+const feedPost = `:is([data-testid="primaryColumn"] ${outerTweet},${WEB} main article:not(article article))`;
+// Replies are navigable posts. The expanded focal article has no link tab stop.
+const replyPost = `:is([data-testid="primaryColumn"] ${outerTweet}[tabindex="0"],${WEB} main ${POST_LINK}>article:not(article article))`;
+function postHoverCss(post: string) {
+  return `
+${post}{position:relative;isolation:isolate;background-color:transparent!important}
+${post}::before{content:"";position:absolute;inset:2px 6px;border-radius:12px;pointer-events:none;z-index:-1;opacity:0;background-color:color-mix(in srgb,currentColor var(--se-hover-tint,3%),transparent)}
+${post}:hover::before{opacity:1;transition:opacity 120ms 120ms}
+@media(prefers-reduced-motion:reduce){${post}:hover::before{transition:none}}`;
+}
 export const DETAIL_FRAME_CSS = `
 ${WEB} body > div:has(> .flex > div.grid > main){max-width:none!important;padding:0!important;--x-main-column-width:100%!important}
 ${WEB} div:has(+ div.grid > main),${WEB} main + aside,${WEB} main :is([data-page-header],[data-top-chrome]),${WEB} [data-slot="xds-dock"]{display:none!important}
@@ -115,16 +128,24 @@ main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),
 [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
 [data-testid="primaryColumn"]>div>div:has([data-testid="app-bar-back"]):not(:has(section)){display:none!important}
-[data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{${insetLine}}
+[data-testid="cellInnerDiv"]>div{${insetLine}}
+${composeSeparator}{${separatorStyle}}
 [data-testid="primaryColumn"],${WEB} div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:clamp(0px,round(nearest,calc(var(--se-detail-gutter,0) * 100%),1px),round(down,calc((100% - 360px) / 2),1px))!important}
-html{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:transparent transparent}
-html:hover{scrollbar-color:#8885 transparent}
+@property --se-detail-thumb{syntax:"<color>";inherits:false;initial-value:transparent}
+html{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:var(--se-detail-thumb) transparent}
+${postHoverCss(replyPost)}
+html{--se-hover-tint:var(--se-frame-hover-tint,3%)}
+html:is([data-theme="dark"],[data-site-enhancer-x-tone="dark"]){--se-hover-tint:5%}
+html:hover{--se-detail-thumb:#8885;transition:--se-detail-thumb 120ms 120ms}
+@media(prefers-reduced-motion:reduce){html:hover{transition:none}}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
 
 const HEADER_CONTROL = '[data-page-header], [data-top-chrome], [role="tablist"], [data-testid="app-bar-back"]';
 const HEADER_TARGET = `${PRIMARY_COLUMN}, ${HEADER_CONTROL}`;
 const TIMELINE_CELL = '[data-testid="cellInnerDiv"], article[data-testid="tweet"]';
+const SEARCH_SIDEBAR = `[data-testid="sidebarColumn"], ${WEB} main + aside`;
+const SEARCH_FORM = 'form[role="search"]';
 const W = WEB + '[data-site-enhancer-columns]';
 const row = W + ' body > div > .flex:has(> div.grid > main)';
 export const COLUMNS_CSS = `
@@ -135,17 +156,18 @@ ${W}[data-site-enhancer-compact-nav] body > div > .flex:has(> div.grid > main) >
 ${row} > div.grid{display:grid!important;grid-template-columns:var(--se-feed) var(--se-detail)!important;max-width:none!important;min-width:0!important}
 ${row} > div.grid > main{position:relative;isolation:isolate;margin:0!important}
 ${row} > div.grid > aside{display:none!important}
-${W}:has(#site-enhancer-columns [data-state="empty"]) main + aside{display:flex!important;position:sticky;top:var(--se-column-header-height,54px);align-self:start;max-height:calc(100vh - var(--se-column-header-height,54px));overflow:auto;margin-top:var(--se-column-header-height,54px)}
+${W}:has(#site-enhancer-columns [data-state="empty"]) main + aside{display:flex!important;position:sticky;top:0;align-self:start;max-height:100vh;overflow:auto;margin-top:0;padding-top:var(--se-search-inset)!important}
 ${W}:has(main + aside) #site-enhancer-columns:has([data-state="empty"]){bottom:auto}
 ${W}:has(main + aside) #site-enhancer-columns [data-state="empty"]{display:none}
 ${W} body > [data-base-ui-portal]{position:relative;z-index:6}
-${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:none}
+${SCOPE}{--se-search-inset:max(0px,calc((var(--se-column-header-height,54px) - 44px) / 2));--se-rail-bottom:min(84px,20vh);--se-layout-bottom:var(--se-rail-bottom);--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:none}
 ${SCOPE}::-webkit-scrollbar{display:none}
 ${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:transparent!important}
 ${SCOPE}[data-site-enhancer-feed-scrolled] [data-site-enhancer-column-header]{${insetLine}}
 ${SCOPE} [data-testid="primaryColumn"],${row} > div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:var(--se-feed-gutter,0px)!important}
 ${SCOPE} [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
-${SCOPE} [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{${insetLine}}
+${SCOPE} [data-testid="cellInnerDiv"]>div{${insetLine}}
+${SCOPE} ${composeSeparator}{${separatorStyle}}
 ${SCOPE} header[role="banner"]{width:var(--se-nav)!important;flex:0 0 var(--se-nav)!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_NewTweet_Button"]{width:calc(var(--se-nav) - 24px)!important;min-width:0!important}
 ${SCOPE} header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]{max-width:var(--se-nav)!important;min-width:0!important}
@@ -156,7 +178,8 @@ ${SCOPE} main[role="main"]{width:var(--se-feed)!important;max-width:var(--se-fee
 ${SCOPE} main[role="main"]>div,${SCOPE} div:has(>[data-testid="primaryColumn"]),${SCOPE} [data-testid="primaryColumn"]{width:100%!important;max-width:100%!important;min-width:0!important}
 ${SCOPE} [data-testid="primaryColumn"] .r-1ye8kvj:has(>section){max-width:none!important}
 ${SCOPE} [data-testid="sidebarColumn"]{display:none!important}
-${SCOPE}:has(#site-enhancer-columns [data-state="empty"]) [data-testid="sidebarColumn"]{display:flex!important;position:fixed!important;inset:var(--se-column-header-height,54px) 0 0 auto!important;width:var(--se-detail)!important;max-width:none!important;margin:0!important;overflow:auto;padding-inline:16px;box-sizing:border-box}
+${SCOPE}:has(#site-enhancer-columns [data-state="empty"]) [data-testid="sidebarColumn"]{display:flex!important;position:fixed!important;inset:0 0 0 auto!important;padding-top:var(--se-search-inset)!important;width:var(--se-detail)!important;max-width:none!important;margin:0!important;overflow:auto;padding-inline:16px;box-sizing:border-box}
+${SCOPE}:has(#site-enhancer-columns [data-state="empty"]) :is(${SEARCH_SIDEBAR}) > :is(${SEARCH_FORM},:has(${SEARCH_FORM})){margin-block-start:var(--se-search-offset,0px)!important}
 ${SCOPE} [data-testid="sidebarColumn"]>div{width:100%!important;max-width:600px!important;margin-inline:auto!important}
 ${SCOPE} [data-testid="sidebarColumn"]>div div:is(:has(form[role="search"]),:has([data-testid="trend"])){width:100%!important;max-width:none!important;box-sizing:border-box}
 ${SCOPE} [data-testid="sidebarColumn"]>div>div{position:static!important}
@@ -169,8 +192,9 @@ ${SCOPE}:has([data-testid="sidebarColumn"]) #site-enhancer-columns [data-state="
 ${SCOPE} #react-root>div:has(>div>#layers :is(${X_OVERLAY_SELECTOR})){z-index:6!important}
 /* The bottom-right drawers sit under the detail panel and would only flash over it while the app root is lifted. */
 ${SCOPE} #layers :is([data-testid="GrokDrawer"],[data-testid="chat-drawer-root"],[data-testid="DMDrawer"]){display:none!important}
-${SCOPE}:has(#site-enhancer-columns[data-dark]){--se-selection-tint:8%}
-${SCOPE} [data-site-enhancer-selected]{border-radius:12px!important;background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) var(--se-selection-tint,5%),transparent)!important}
+${SCOPE}:has(#site-enhancer-columns[data-dark]){--se-selection-tint:10%;--se-hover-tint:5%}
+${postHoverCss(`${SCOPE} ${feedPost}`)}
+${SCOPE} ${feedPost}[data-site-enhancer-selected]::before{opacity:1;transition:none;background-color:color-mix(in srgb,var(--se-x-accent,#1d9bf0) var(--se-selection-tint,7%),transparent)}
 /* Compact navigation keeps every glyph on the same 24px / 48px grid. */
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"]>div>div>div{padding-left:0!important;padding-right:0!important;align-items:center!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] nav{width:100%!important;align-items:center!important;gap:4px!important}
@@ -185,48 +209,54 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:not(:first-child){display:none!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"]>div:first-child{width:24px!important;height:24px!important;min-width:24px!important;flex-basis:24px!important}
 ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="SideNav_AccountSwitcher_Button"] :is(img,[data-testid^="UserAvatar-Container"]){width:24px!important;height:24px!important;min-width:24px!important}
-/* Sidebar toggle sits inside the nav rail: right-aligned above the account switcher when expanded, centered on the icon column when compact. */
-${SCOPE} #site-enhancer-nav-toggle{position:fixed;left:calc(var(--se-nav) - 52px);bottom:84px;z-index:5;display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:var(--se-toggle-bg,var(--se-x-bg,#fff));color:var(--se-toggle-fg,var(--se-x-muted,#536471));cursor:pointer;opacity:0;transition:opacity .15s,background-color .15s,color .15s}
-${SCOPE}:has(header[role="banner"]:hover) #site-enhancer-nav-toggle,${W}:has(body > div > .flex > div:first-child:hover + .grid > main) #site-enhancer-nav-toggle,${SCOPE} #site-enhancer-nav-toggle:is(:hover,:focus-visible){opacity:1}
-${SCOPE} #site-enhancer-nav-toggle[hidden]{display:none}
-${SCOPE}[data-site-enhancer-compact-nav] #site-enhancer-nav-toggle{left:calc(var(--se-nav) / 2 - 20px)}
-${SCOPE} #site-enhancer-nav-toggle:hover{background:color-mix(in srgb,currentColor 10%,var(--se-toggle-bg,var(--se-x-bg,#fff)));color:var(--se-x-text,var(--se-toggle-hover,#0f1419))}
-#site-enhancer-nav-toggle svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-#site-enhancer-nav-toggle:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
+/* Rail controls live outside X's app root and share the rail's hover state. */
+${SCOPE} .se-rail-button{position:fixed;left:calc(var(--se-nav) - 52px);bottom:var(--se-rail-bottom);z-index:5;display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:50%;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-muted,var(--se-native-muted,#536471));cursor:pointer;opacity:0}
+${SCOPE} #site-enhancer-layout-trigger{left:calc(var(--se-nav) - 96px);bottom:var(--se-layout-bottom)}
+${SCOPE}:has(header[role="banner"]:hover) .se-rail-button,${W}:has(body > div > .flex > div:first-child:hover + .grid > main) .se-rail-button,${SCOPE}:has(.se-rail-button:hover) .se-rail-button{opacity:1;transition:opacity 120ms 120ms}
+${SCOPE} .se-rail-button:focus-visible,${SCOPE}:has(#site-enhancer-layout-menu) .se-rail-button{opacity:1}
+${SCOPE} .se-rail-button[hidden]{display:none}
+${SCOPE}[data-site-enhancer-compact-nav]{--se-layout-bottom:calc(var(--se-rail-bottom) + 44px)}
+${SCOPE}[data-site-enhancer-compact-nav]:has(#site-enhancer-nav-toggle[hidden]){--se-layout-bottom:var(--se-rail-bottom)}
+${SCOPE}[data-site-enhancer-compact-nav] .se-rail-button,${SCOPE}[data-site-enhancer-compact-nav] #site-enhancer-layout-trigger{left:calc(var(--se-nav) / 2 - 20px)}
+${SCOPE} .se-rail-button:hover{background:color-mix(in srgb,currentColor 10%,var(--se-x-bg,var(--se-native-bg,#fff)));color:var(--se-x-text,var(--se-native-text,#0f1419))}
+${SCOPE} .se-rail-button svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+${SCOPE} .se-rail-button:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 .se-column-divider[hidden]{display:none}
 #site-enhancer-columns{position:fixed;right:0;top:0;bottom:0;width:var(--se-detail);z-index:3;display:flex;flex-direction:column;background:var(--se-x-bg,var(--se-native-bg,#fff));color:var(--se-x-text,var(--se-native-text,#0f1419));font:14px/1.5 system-ui;box-sizing:border-box}
 #site-enhancer-columns *{box-sizing:border-box}
-${SCOPE} #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:4px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid transparent}
+${SCOPE} #site-enhancer-columns .se-column-toolbar{display:flex;align-items:center;gap:8px;flex:0 0 var(--se-column-header-height,54px);padding:0 16px;border-bottom:1px solid transparent}
 ${SCOPE} #site-enhancer-columns[data-detail-scrolled] .se-column-toolbar{${insetLine}}
 #site-enhancer-columns .se-column-toolbar .se-column-title{font-size:15px;font-weight:650;letter-spacing:.01em;margin-right:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#site-enhancer-columns button,#site-enhancer-columns a{font:inherit;color:inherit;background:transparent;border:0;text-decoration:none;cursor:pointer;border-radius:9px}
+#site-enhancer-columns .se-toolbar-group{display:flex;align-items:center;gap:4px}
+#site-enhancer-columns button.se-column-title:not(:disabled):hover{text-decoration:underline;text-underline-offset:3px}
+#site-enhancer-columns button,#site-enhancer-columns a,#site-enhancer-layout-menu button{font:inherit;color:inherit;background:transparent;border:0;text-decoration:none;cursor:pointer;border-radius:9px}
 #site-enhancer-columns .se-column-icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;padding:7px;color:var(--se-x-muted,var(--se-native-muted,#65717b));transition:background .15s,color .15s}
 #site-enhancer-columns button:disabled{cursor:default}
 #site-enhancer-columns button:disabled:not(.se-column-title){opacity:.28}
-#site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover,#site-enhancer-columns .se-column-icon[aria-expanded="true"]{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
-#site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
-#site-enhancer-columns .se-width-menu{position:absolute;z-index:2;top:calc(var(--se-column-header-height,54px) - 4px);width:264px;padding:6px;border:1px solid var(--se-column-line);border-radius:14px;background:var(--se-x-bg,var(--se-native-bg,#fff));box-shadow:0 8px 28px #0002,0 1px 3px #0001;--se-menu-muted:var(--se-x-muted,var(--se-native-muted,#65717b))}
-#site-enhancer-columns[data-dark] .se-width-menu{box-shadow:0 0 0 1px #ffffff14,0 8px 28px #000a}
-#site-enhancer-columns .se-width-header{font-size:12px;font-weight:600;color:var(--se-menu-muted);padding:6px 10px 4px}
-#site-enhancer-columns .se-width-menu button{display:flex;align-items:center;gap:10px;padding:8px 10px;width:100%;text-align:start}
-#site-enhancer-columns .se-width-menu button:not(:disabled):hover{background:color-mix(in srgb,currentColor 6%,transparent)}
-#site-enhancer-columns .se-width-diagram{width:40px;height:20px;display:flex;align-items:stretch;justify-content:center;gap:2px;flex:none}
-#site-enhancer-columns .se-width-diagram i{border:1.4px solid currentColor;border-radius:3px;opacity:.55}
-#site-enhancer-columns [aria-checked="true"] .se-width-diagram i{opacity:1;border-color:var(--se-x-accent,#1d9bf0)}
-#site-enhancer-columns [aria-checked="true"] .se-width-diagram i:first-child{background:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 22%,transparent)}
-#site-enhancer-columns .se-width-label{font-weight:500;flex:1}
-#site-enhancer-columns .se-width-ratio{font-size:13px;font-variant-numeric:tabular-nums;color:var(--se-menu-muted)}
-#site-enhancer-columns .se-width-check{width:16px;display:flex;color:var(--se-x-accent,#1d9bf0)}
-#site-enhancer-columns .se-width-check svg{width:16px;height:16px;stroke-width:2}
-#site-enhancer-columns [aria-checked="false"] .se-width-check svg{display:none}
-#site-enhancer-columns .se-width-line{height:1px;background:var(--se-column-line);margin:6px 4px}
-#site-enhancer-columns .se-gutter-row{display:flex;align-items:center;gap:10px;padding:5px 10px}
-#site-enhancer-columns .se-segments{display:flex;padding:2px;border-radius:8px;background:color-mix(in srgb,currentColor 7%,transparent)}
-#site-enhancer-columns .se-segments button{justify-content:center;width:auto;min-width:30px;height:24px;padding:0 4px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--se-menu-muted)}
-#site-enhancer-columns .se-width-menu .se-segments button[aria-checked="true"]{background:var(--se-x-bg,#fff);color:inherit;font-weight:600;box-shadow:0 1px 2px #0003}
-#site-enhancer-columns[data-dark] .se-width-menu .se-segments button[aria-checked="true"]{background:color-mix(in srgb,currentColor 18%,transparent);box-shadow:none}
-#site-enhancer-columns .se-width-reset{color:var(--se-menu-muted)}
-#site-enhancer-columns :focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
+#site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
+#site-enhancer-columns svg,#site-enhancer-layout-menu svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+#site-enhancer-layout-menu{position:fixed;z-index:7;left:clamp(8px,calc(var(--se-nav) + 8px),calc(100vw - 272px));bottom:var(--se-layout-bottom);max-height:calc(100dvh - var(--se-layout-bottom) - 8px);overflow:auto;box-sizing:border-box;font:14px/1.5 system-ui;color:var(--se-x-text,var(--se-native-text,#0f1419));width:264px;padding:6px;border:1px solid var(--se-column-line);border-radius:14px;background:var(--se-x-bg,var(--se-native-bg,#fff));box-shadow:0 8px 28px #0002,0 1px 3px #0001;--se-menu-muted:var(--se-x-muted,var(--se-native-muted,#65717b))}
+#site-enhancer-layout-menu[data-dark]{box-shadow:0 0 0 1px #ffffff14,0 8px 28px #000a}
+#site-enhancer-layout-menu .se-width-header{font-size:12px;font-weight:600;color:var(--se-menu-muted);padding:6px 10px 4px}
+#site-enhancer-layout-menu button{display:flex;align-items:center;gap:10px;padding:8px 10px;width:100%;text-align:start}
+#site-enhancer-layout-menu button:not(:disabled):hover{background:color-mix(in srgb,currentColor 6%,transparent)}
+#site-enhancer-layout-menu .se-width-diagram{width:40px;height:20px;display:flex;align-items:stretch;justify-content:center;gap:2px;flex:none}
+#site-enhancer-layout-menu .se-width-diagram i{border:1.4px solid currentColor;border-radius:3px;opacity:.55}
+#site-enhancer-layout-menu [aria-checked="true"] .se-width-diagram i{opacity:1;border-color:var(--se-x-accent,#1d9bf0)}
+#site-enhancer-layout-menu [aria-checked="true"] .se-width-diagram i:first-child{background:color-mix(in srgb,var(--se-x-accent,#1d9bf0) 22%,transparent)}
+#site-enhancer-layout-menu .se-width-label{font-weight:500;flex:1}
+#site-enhancer-layout-menu .se-width-ratio{font-size:13px;font-variant-numeric:tabular-nums;color:var(--se-menu-muted)}
+#site-enhancer-layout-menu .se-width-check{width:16px;display:flex;color:var(--se-x-accent,#1d9bf0)}
+#site-enhancer-layout-menu .se-width-check svg{width:16px;height:16px;stroke-width:2}
+#site-enhancer-layout-menu [aria-checked="false"] .se-width-check svg{display:none}
+#site-enhancer-layout-menu .se-width-line{height:1px;background:var(--se-column-line);margin:6px 4px}
+#site-enhancer-layout-menu .se-gutter-row{display:flex;align-items:center;gap:10px;padding:5px 10px}
+#site-enhancer-layout-menu .se-segments{display:flex;padding:2px;border-radius:8px;background:color-mix(in srgb,currentColor 7%,transparent)}
+#site-enhancer-layout-menu .se-segments button{justify-content:center;width:auto;min-width:30px;height:24px;padding:0 4px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--se-menu-muted)}
+#site-enhancer-layout-menu .se-segments button[aria-checked="true"]{background:var(--se-x-bg,var(--se-native-bg,#fff));color:inherit;font-weight:600;box-shadow:0 1px 2px #0003}
+#site-enhancer-layout-menu[data-dark] .se-segments button[aria-checked="true"]{background:color-mix(in srgb,currentColor 18%,transparent);box-shadow:none}
+#site-enhancer-layout-menu .se-width-reset{color:var(--se-menu-muted)}
+#site-enhancer-columns :focus-visible,#site-enhancer-layout-menu :focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
 #site-enhancer-columns [hidden]{display:none!important}
@@ -239,17 +269,28 @@ ${SCOPE} #site-enhancer-columns[data-detail-scrolled] .se-column-toolbar{${inset
 #site-enhancer-columns .se-status-icon{display:flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:18px;background:color-mix(in srgb,currentColor 4%,transparent);color:var(--se-x-muted,var(--se-native-muted,#65717b));margin-bottom:20px}
 #site-enhancer-columns .se-status-icon svg{width:25px;height:25px;stroke-width:1.35}
 #site-enhancer-columns .se-column-status button{margin-top:20px;padding:8px 20px;background:color-mix(in srgb,currentColor 6%,transparent);font-weight:600}
-#site-enhancer-columns [data-state="loading"] .se-status-icon svg{animation:se-column-spin 1.4s linear infinite}
+#site-enhancer-columns .se-column-status[data-state="loading"]{justify-content:flex-start;align-items:stretch;padding:16px}
+#site-enhancer-columns .se-status-label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#site-enhancer-columns .se-post-skeleton{display:grid;grid-template-columns:40px 1fr;gap:8px 12px;align-items:center}
+#site-enhancer-columns .se-post-skeleton span{height:12px;border-radius:6px;background-color:color-mix(in srgb,currentColor 7%,transparent);background-image:linear-gradient(100deg,transparent 35%,color-mix(in srgb,currentColor 4%,transparent) 50%,transparent 65%);background-size:250% 100%;animation:se-column-shimmer 2.4s linear infinite}
+#site-enhancer-columns span.se-skeleton-avatar{grid-row:span 2;height:40px;border-radius:50%}
+#site-enhancer-columns .se-skeleton-name{width:28%}
+#site-enhancer-columns .se-skeleton-handle{width:19%}
+#site-enhancer-columns .se-skeleton-line,#site-enhancer-columns .se-skeleton-media{grid-column:1/-1}
+#site-enhancer-columns .se-skeleton-line:nth-child(4){margin-top:8px}
+#site-enhancer-columns .se-skeleton-line:nth-child(5){width:92%}
+#site-enhancer-columns .se-skeleton-line:nth-child(6){width:60%}
+#site-enhancer-columns span.se-skeleton-media{height:180px;border-radius:16px;margin-top:8px}
 #site-enhancer-columns[data-switching] .se-column-toolbar::after{content:"";position:absolute;top:var(--se-column-header-height,54px);left:0;width:30%;height:2px;background:var(--se-x-accent,#1d9bf0);animation:se-progress 1s ease-in-out infinite alternate;z-index:1}
 @keyframes se-progress{to{transform:translateX(230%)}}
-@keyframes se-column-spin{to{transform:rotate(360deg)}}
+@keyframes se-column-shimmer{from{background-position:100% 0}to{background-position:-65% 0}}
 ${SCOPE} .se-column-divider{position:fixed;top:0;bottom:0;width:12px;margin-left:-6px;z-index:4;cursor:col-resize;touch-action:none;background:transparent;border:0;padding:0;outline:none}
-${SCOPE} .se-column-divider::after{content:"";position:absolute;left:4px;top:clamp(var(--se-column-header-height,54px),calc(var(--se-grip-y,50%) - 20px),calc(100% - 40px));width:4px;height:40px;border-radius:4px;background:var(--se-x-muted,#73818d);opacity:0;transition:opacity .12s}
-${SCOPE} .se-column-divider:hover::after{opacity:.75;transition-delay:120ms}
+${SCOPE} .se-column-divider::after{content:"";position:absolute;left:4px;top:clamp(var(--se-column-header-height,54px),calc(var(--se-grip-y,50%) - 20px),calc(100% - 40px));width:4px;height:40px;border-radius:4px;background:var(--se-x-muted,#73818d);opacity:0}
+${SCOPE} .se-column-divider:hover::after{opacity:.75;transition:opacity 120ms 120ms}
 ${SCOPE} .se-column-divider:focus-visible::after{top:calc(50% - 20px);opacity:1;outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 ${SCOPE}[data-site-enhancer-resizing] .se-column-divider[data-dragging]::after{opacity:1;background:var(--se-x-accent,#1d9bf0);transition:none}
 ${SCOPE}[data-site-enhancer-resizing] .se-column-divider[data-dragging]::before{content:"";position:absolute;inset:0 auto 0 50%;width:1px;background:var(--se-x-accent,#1d9bf0);opacity:.5}
-@media(prefers-reduced-motion:reduce){#site-enhancer-columns *,${SCOPE} #site-enhancer-nav-toggle,${SCOPE} .se-column-divider::after{animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:reduce){#site-enhancer-columns *,${SCOPE} .se-rail-button,${SCOPE} .se-column-divider::after{animation:none!important;transition:none!important}}
 ${SCOPE}[data-site-enhancer-resizing] iframe{pointer-events:none!important}
 ${SCOPE}[data-site-enhancer-resizing],${SCOPE}[data-site-enhancer-resizing] *{cursor:col-resize!important;user-select:none!important}
 `;
@@ -259,7 +300,7 @@ const zh = {
   collapseNav: '收起侧边栏', expandNav: '展开侧边栏',
   saveFailed: '栏宽已调整，但无法保存', saveFailedHint: '本次页面仍会使用当前宽度。',
   empty: '选择一条推文', emptyHint: '点击时间线中的推文，在这里查看详情和回复。',
-  loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
+  loading: '正在加载详情…',
   frameTitle: '推文详情和回复', panel: '推文详情', title: '推文详情',
   failed: '详情暂时无法加载', failedHint: '请重新加载扩展和页面后重试，或在新标签页查看。', retryHint: '可以重试，或在新标签页查看。',
   newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复默认布局', close: '关闭',
@@ -274,7 +315,7 @@ export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
     collapseNav: 'Collapse sidebar', expandNav: 'Expand sidebar',
     saveFailed: 'Column widths changed but couldn’t be saved', saveFailedHint: 'This page keeps the current widths.',
     empty: 'Select a post', emptyHint: 'Click a post in the timeline to see it and its replies here.',
-    loading: 'Loading post…', loadingHint: 'The timeline stays where it is.',
+    loading: 'Loading post…',
     frameTitle: 'Post and replies', panel: 'Post details', title: 'Post',
     failed: 'Couldn’t load the post', failedHint: 'Reload the extension and the page, then try again, or open it in a new tab.', retryHint: 'Try again, or open it in a new tab.',
     newTab: 'New tab', copyLink: 'Copy link', copiedLink: 'Link copied', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset layout', close: 'Close',
@@ -365,16 +406,20 @@ export function installXColumns(options: {
   let headerObserver: MutationObserver | undefined;
   let headerFrame: number | undefined;
   let sizeObserver: ResizeObserver | undefined;
+  let searchFrame: number | undefined;
+  let measuredSearch: Element | null = null;
+  let measuredSidebar: Element | null = null;
   let measuredHeader: Element | undefined;
   let unmeasuredHeaderElements: Element[] = [];
   let backButton: HTMLButtonElement;
   let forwardButton: HTMLButtonElement;
-  let closeButton: HTMLButtonElement;
+  let toolbar: HTMLDivElement;
+  let historyGroup: HTMLDivElement;
   function syncToolbar() {
     backButton.disabled = !history.canBack();
     forwardButton.disabled = !history.canForward();
-    backButton.hidden = forwardButton.hidden = !selected || (backButton.disabled && forwardButton.disabled);
-    copyLinkButton.hidden = openLink.hidden = closeButton.hidden = !selected;
+    toolbar.hidden = !selected;
+    historyGroup.hidden = backButton.disabled && forwardButton.disabled;
   }
   const history = installDetailHistory(url => {
     if (!panel) return;
@@ -392,24 +437,41 @@ export function installXColumns(options: {
   const active = () => enabled && viewportWidth() >= COLUMNS_MIN_WIDTH;
   function save() {
     try { localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify(widths)); }
-    catch { showStatus('saveFailed', 'saveFailedHint', 'error'); }
+    catch { showStatus('error', 'saveFailed', 'saveFailedHint'); }
   }
   type Label = keyof typeof COLUMNS_LABELS.en;
-  function showStatus(title: Label, description: Label, state: 'empty' | 'loading' | 'error' = 'empty') {
+  function showStatus(...args: [state: 'loading'] | [state: 'empty' | 'error', title: Label, description: Label]) {
+    const [state, title, description] = args;
     if (state !== 'loading') hidePrevious();
-    lastStatus = [title, description, state];
+    lastStatus = args;
     status.replaceChildren();
+    status.dataset.state = state;
+    status.hidden = false;
+    if (state === 'empty') scheduleSearchAlignment();
+    panel?.removeAttribute('data-detail-scrolled');
+    if (state === 'loading') {
+      const label = document.createElement('span');
+      label.className = 'se-status-label';
+      label.textContent = t.loading;
+      const skeleton = document.createElement('div');
+      skeleton.className = 'se-post-skeleton';
+      skeleton.setAttribute('aria-hidden', 'true');
+      for (const part of ['avatar', 'name', 'handle', 'line', 'line', 'line', 'media']) {
+        const shape = document.createElement('span');
+        shape.className = `se-skeleton-${part}`;
+        skeleton.append(shape);
+      }
+      status.append(label, skeleton);
+      return;
+    }
     const heading = document.createElement('strong');
     heading.textContent = t[title];
     const body = document.createElement('p');
     body.textContent = t[description];
-    status.dataset.state = state;
     const decoration = document.createElement('span');
     decoration.className = 'se-status-icon';
     decoration.append(icon(state));
     status.append(decoration, heading, body, retry);
-    status.hidden = false;
-    panel?.removeAttribute('data-detail-scrolled');
   }
   function stopFrameWatch() {
     clearInterval(timer);
@@ -473,7 +535,7 @@ export function installXColumns(options: {
     retry.hidden = true;
     syncToolbar();
     updateTitle();
-    showStatus('empty', 'emptyHint');
+    showStatus('empty', 'empty', 'emptyHint');
     if (restoreFocus && returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
   let hoverFrame: { url: string; frame: HTMLIFrameElement } | undefined;
@@ -567,7 +629,7 @@ export function installXColumns(options: {
     stopFrameWatch();
     discardFrame(current);
     frame = undefined;
-    showStatus('failed', hint, 'error');
+    showStatus('error', 'failed', hint);
     retry.hidden = false;
   }
   function openDetail(url: string) {
@@ -601,7 +663,7 @@ export function installXColumns(options: {
     if (cached) discardFrame(cached.frame);
     // Bound the cache to two connected frames, including the incoming load.
     while (readyFrames.size > 1) discardFrame(readyFrames.values().next().value!.frame);
-    showStatus('loading', 'loadingHint', 'loading');
+    showStatus('loading');
     if (previous?.isConnected) {
       previous.inert = true;
       previous.setAttribute('data-switch-preview', '');
@@ -649,6 +711,7 @@ export function installXColumns(options: {
               title.textContent = primary.querySelector('[data-testid="User-Name"]')?.textContent || t.title;
             }
             frameDocuments.set(current, doc);
+            doc.documentElement.style.setProperty('--se-frame-hover-tint', panel.hasAttribute('data-dark') ? '5%' : '3%');
             doc.defaultView?.addEventListener('scroll', syncDetailScroll, { passive: true });
             media.attach(doc, current);
             readyFrames.set(url, { frame: current, doc, scrollX: 0, scrollY: 0 });
@@ -684,7 +747,6 @@ export function installXColumns(options: {
     check: 'M5 12.5l4.5 4.5L19 7.5',
     close: 'M6 6l12 12M18 6L6 18',
     empty: 'M5 4h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H9l-5 3V5a1 1 0 0 1 1-1M8 8h8M8 12h5',
-    loading: 'M20 12a8 8 0 1 1-8-8',
     error: 'M12 8v5M12 16v.01M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18',
     collapseNav: 'M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4M9 4v16M16 9.5 13.5 12l2.5 2.5',
     expandNav: 'M5.5 4h13A2.5 2.5 0 0 1 21 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11A2.5 2.5 0 0 1 5.5 4M9 4v16M13.5 9.5 16 12l-2.5 2.5',
@@ -713,10 +775,13 @@ export function installXColumns(options: {
   }
   function createWidthControl() {
     const menu = document.createElement('div');
+    menu.id = 'site-enhancer-layout-menu';
     menu.className = 'se-width-menu';
     menu.setAttribute('role', 'dialog');
     localized(() => menu.setAttribute('aria-label', t.layout));
     const trigger = button('layout', () => menu.isConnected ? close() : open(), 'widths');
+    trigger.id = 'site-enhancer-layout-trigger';
+    trigger.classList.add('se-rail-button');
     trigger.setAttribute('aria-haspopup', 'dialog');
     trigger.setAttribute('aria-expanded', 'false');
 
@@ -811,16 +876,17 @@ export function installXColumns(options: {
       for (const { key, radios } of gutterGroups) {
         syncGroup(radios, gutterLevels.findIndex(level => level.value === widths[key]));
       }
-      if (menu.isConnected) menu.style.left = `${Math.max(8, trigger.offsetLeft + trigger.offsetWidth - menu.offsetWidth)}px`;
     }
     function open() {
       trigger.after(menu);
+      trigger.setAttribute('aria-controls', menu.id);
       trigger.setAttribute('aria-expanded', 'true');
       sync();
       items.find(radio => radio.tabIndex === 0)!.focus();
     }
     function close(returnToTrigger = false) {
       menu.remove();
+      trigger.removeAttribute('aria-controls');
       trigger.setAttribute('aria-expanded', 'false');
       if (returnToTrigger) trigger.focus();
     }
@@ -852,7 +918,7 @@ export function installXColumns(options: {
       event.preventDefault();
       event.stopPropagation();
     });
-    return { trigger, sync, dismissOutside(target: Node | null) {
+    return { trigger, menu, sync, dismissOutside(target: Node | null) {
       if (menu.isConnected && !menu.contains(target) && !trigger.contains(target)) close();
     } };
   }
@@ -880,7 +946,7 @@ export function installXColumns(options: {
     panel.id = 'site-enhancer-columns';
     const current = panel;
     localized(() => current.setAttribute('aria-label', t.panel));
-    const toolbar = document.createElement('div');
+    toolbar = document.createElement('div');
     toolbar.className = 'se-column-toolbar';
     title = document.createElement('button');
     title.className = 'se-column-title';
@@ -919,8 +985,14 @@ export function installXColumns(options: {
     backButton = button('back', () => history.back(), 'back');
     forwardButton = button('forward', () => history.forward(), 'forward');
     widthControl = createWidthControl();
-    closeButton = button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close');
-    toolbar.append(title, backButton, forwardButton, copyLinkButton, openLink, widthControl.trigger, closeButton);
+    const closeButton = button('close', () => { history.select(undefined); if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true }); }, 'close');
+    historyGroup = document.createElement('div');
+    historyGroup.className = 'se-toolbar-group';
+    historyGroup.append(backButton, forwardButton);
+    const linkGroup = document.createElement('div');
+    linkGroup.className = 'se-toolbar-group';
+    linkGroup.append(copyLinkButton, openLink);
+    toolbar.append(title, historyGroup, linkGroup, closeButton);
     status = document.createElement('div');
     status.className = 'se-column-status';
     status.setAttribute('role', 'status');
@@ -931,7 +1003,8 @@ export function installXColumns(options: {
     navToggle.id = 'site-enhancer-nav-toggle';
     localized(renderToggle);
     navToggle.addEventListener('click', () => { end(); collapsed = !collapsed; saveCollapsed(); renderWidths(); });
-    document.body.append(navToggle);
+    navToggle.className = 'se-rail-button';
+    document.body.append(widthControl.trigger, navToggle);
     bodyObserver = new MutationObserver(renderTheme);
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ['style', 'class'] });
     bodyObserver.observe(root, { attributes: true, attributeFilter: ['data-theme', 'data-site-enhancer-x-theme', 'data-site-enhancer-x-tone'] });
@@ -943,6 +1016,8 @@ export function installXColumns(options: {
         if (entry.target === root && entry.contentRect.width !== observedWidth) {
           observedWidth = entry.contentRect.width;
           refresh();
+        } else if (entry.target === measuredSearch || entry.target === measuredSidebar) {
+          scheduleSearchAlignment();
         } else if (entry.target === measuredHeader) {
           setHeaderHeight(entry.borderBoxSize?.[0]?.blockSize ?? measuredHeader.getBoundingClientRect().height);
         }
@@ -954,6 +1029,13 @@ export function installXColumns(options: {
         Array.from([...record.addedNodes, ...record.removedNodes]).some(node => node instanceof Element &&
           (node.matches('header[role="banner"]') || node.querySelector('header[role="banner"]'))))) syncNativeNav();
       remarkSelection(records);
+      // X can stream the sidebar after the header is already measured.
+      if (status.dataset.state === 'empty' && !measuredSearch?.isConnected && records.some(record => {
+        if (structure?.contains(record.target)) return false;
+        if ((record.target as Element).closest?.(SEARCH_SIDEBAR)) return true;
+        return Array.from(record.addedNodes).some(node => node instanceof Element &&
+          (node.matches(SEARCH_FORM) || !!node.querySelector(SEARCH_FORM)));
+      })) scheduleSearchAlignment();
       if (measuredHeader?.isConnected || headerFrame !== undefined) return;
       const removedHeader = (measuredHeader ?? unmeasuredHeaderElements[0])?.isConnected === false;
       if (!removedHeader && !records.some(changesHeader)) return;
@@ -1032,10 +1114,48 @@ export function installXColumns(options: {
         (!!element.firstElementChild && !!element.querySelector(HEADER_TARGET)));
     });
   }
+  function scheduleSearchAlignment() {
+    if (status.dataset.state !== 'empty' || searchFrame !== undefined) return;
+    searchFrame = window.requestAnimationFrame(() => {
+      searchFrame = undefined;
+      if (status.dataset.state !== 'empty') return;
+      const form = document.querySelector(`:is(${SEARCH_SIDEBAR}) ${SEARCH_FORM}`);
+      if (form !== measuredSearch) {
+        if (measuredSearch) sizeObserver?.unobserve(measuredSearch);
+        measuredSearch = form;
+        if (form) sizeObserver?.observe(form, { box: 'border-box' });
+      }
+      const sidebar = form?.closest(SEARCH_SIDEBAR) ?? null;
+      if (sidebar !== measuredSidebar) {
+        if (measuredSidebar) {
+          sizeObserver?.unobserve(measuredSidebar);
+          measuredSidebar.removeEventListener('scrollend', scheduleSearchAlignment);
+        }
+        measuredSidebar = sidebar;
+        if (sidebar) {
+          sizeObserver?.observe(sidebar, { box: 'border-box' });
+          sidebar.addEventListener('scrollend', scheduleSearchAlignment);
+        }
+      }
+      // A sticky search wrapper changes the form's visual offset while scrolled.
+      // Recheck at scroll end when the sidebar returns to its natural top.
+      if (!sidebar || !form || sidebar.scrollTop) return;
+      const rect = form.getBoundingClientRect();
+      if (!rect.height) return;
+      const headerHeight = parseFloat(root.style.getPropertyValue('--se-column-header-height')) || 54;
+      const delta = (headerHeight - rect.height) / 2 - (rect.top - sidebar.getBoundingClientRect().top);
+      // Measure with the previous correction in place so repeated resizes never accumulate it.
+      if (Math.abs(delta) > 0.5) {
+        const offset = parseFloat(root.style.getPropertyValue('--se-search-offset')) || 0;
+        root.style.setProperty('--se-search-offset', `${offset + delta}px`);
+      }
+    });
+  }
   function setHeaderHeight(height = 54) {
     const value = `${height >= 32 && height <= 120 ? height : 54}px`;
     if (root.style.getPropertyValue('--se-column-header-height') !== value) {
       root.style.setProperty('--se-column-header-height', value);
+      scheduleSearchAlignment();
     }
   }
   function syncHeader() {
@@ -1105,11 +1225,10 @@ export function installXColumns(options: {
     const dark = channels && channels.reduce((sum, value) => sum + value, 0) < 384 && background !== 'rgba(0, 0, 0, 0)';
     root.style.setProperty('--se-native-bg', background === 'rgba(0, 0, 0, 0)' ? '#fff' : background);
     panel.toggleAttribute('data-dark', !!dark);
-    panel.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
-    panel.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
-    navToggle?.style.setProperty('--se-toggle-bg', `var(--se-x-bg,${background === 'rgba(0, 0, 0, 0)' ? '#fff' : background})`);
-    navToggle?.style.setProperty('--se-toggle-fg', `var(--se-x-muted,${dark ? '#939da6' : '#536471'})`);
-    navToggle?.style.setProperty('--se-toggle-hover', dark ? '#e7e9ea' : '#0f1419');
+    for (const doc of frameDocuments.values()) doc.documentElement.style.setProperty('--se-frame-hover-tint', dark ? '5%' : '3%');
+    widthControl?.menu.toggleAttribute('data-dark', !!dark);
+    root.style.setProperty('--se-native-text', dark ? '#e7e9ea' : '#0f1419');
+    root.style.setProperty('--se-native-muted', dark ? '#939da6' : '#65717b');
   }
   function adjust(kind: number, delta: number, snap = false) {
     const width = viewportWidth();
@@ -1161,6 +1280,11 @@ export function installXColumns(options: {
     if (headerFrame !== undefined) window.cancelAnimationFrame(headerFrame);
     headerFrame = undefined;
     sizeObserver?.disconnect();
+    if (searchFrame !== undefined) window.cancelAnimationFrame(searchFrame);
+    searchFrame = undefined;
+    measuredSearch = null;
+    measuredSidebar?.removeEventListener('scrollend', scheduleSearchAlignment);
+    measuredSidebar = null;
     measuredHeader?.removeAttribute('data-site-enhancer-column-header');
     measuredHeader = undefined;
     unmeasuredHeaderElements = [];
@@ -1170,6 +1294,8 @@ export function installXColumns(options: {
     locatePending = false;
     panel?.remove();
     panel = undefined;
+    widthControl?.trigger.remove();
+    widthControl?.menu.remove();
     widthControl = undefined;
     renderedWidth = undefined;
     nativeCompact = false;
@@ -1179,7 +1305,7 @@ export function installXColumns(options: {
     localize = [];
     lastStatus = undefined;
     for (const name of ['data-site-enhancer-columns', 'data-site-enhancer-compact-nav', 'data-site-enhancer-resizing']) root.removeAttribute(name);
-    for (const name of ['--se-native-bg', '--se-nav', '--se-feed', '--se-feed-gutter', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
+    for (const name of ['--se-native-bg', '--se-native-text', '--se-native-muted', '--se-nav', '--se-feed', '--se-feed-gutter', '--se-detail', '--se-column-header-height', '--se-search-offset']) root.style.removeProperty(name);
   }
   function refresh() {
     if (disposed) return;
@@ -1205,6 +1331,7 @@ export function installXColumns(options: {
     root.toggleAttribute('data-site-enhancer-columns', true);
     if (width !== renderedWidth || !root.style.getPropertyValue('--se-feed')) renderWidths(width);
     if (!measuredHeader?.isConnected) syncHeader();
+    scheduleSearchAlignment();
   }
   /** X closes a video's context menu only when a click reaches its own document. Clicks in
    * another document (timeline vs. detail frame) and clicks this layout intercepts never do. */
