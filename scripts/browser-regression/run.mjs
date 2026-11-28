@@ -451,18 +451,28 @@ await step('X screenshot preview and PNG copy', async () => {
         type: 'image/png', signature: [137, 80, 78, 71, 13, 10, 26, 10], width, height,
         corner: [255, 255, 255, 255], center: [52, 120, 173, 255],
       }]);
+      if (menuDwellMs === 250) {
+        await page.click('.se-screenshot-preview button[title="Rounded corners (R)"]');
+        await page.clearClipboard();
+        await page.click('.se-screenshot-preview [data-copy]');
+        await page.waitFor('rounded PNG', "return document.documentElement.hasAttribute('data-se-test-clipboard')");
+        const [rounded] = await page.clipboard();
+        equal('rounded PNG has transparent corners', rounded.corner, [0, 0, 0, 0]);
+        equal('rounded PNG retains opaque content', rounded.center, [52, 120, 173, 255]);
+      }
       const previewGeometry = () => page.eval(`
         const dialog = document.querySelector('.se-screenshot-preview');
         const canvas = dialog.querySelector('canvas:not([data-outgoing])');
         const body = dialog.querySelector('.se-shot-body');
-        return { height:dialog.offsetHeight, top:dialog.getBoundingClientRect().top, gap:body.getBoundingClientRect().bottom - canvas.getBoundingClientRect().bottom };
+        return { toolbarTop:dialog.querySelector('.se-shot-toolbar').getBoundingClientRect().top, height:dialog.offsetHeight, top:dialog.getBoundingClientRect().top, gap:body.getBoundingClientRect().bottom - canvas.getBoundingClientRect().bottom };
       `);
       const before = await previewGeometry();
-      await page.click('.se-screenshot-preview button[aria-pressed]');
+      await page.click('.se-screenshot-preview button[title="Hide metrics (H)"]');
       await page.waitFor('metrics variant ready', "return !!document.querySelector('.se-screenshot-preview [data-copy]:enabled')");
       await page.eval("return new Promise(resolve => setTimeout(resolve, 180))");
       const after = await previewGeometry();
       equal('screenshot preview top stays anchored', after.top, before.top);
+      equal('header stays pinned inside the top border', after.toolbarTop, before.top + 1);
       check('omitting metrics shortens the preview', after.height < before.height, {before,after});
       check('short preview fits its canvas and body padding', Math.abs(after.gap - 20) <= 1, after);
     } finally {

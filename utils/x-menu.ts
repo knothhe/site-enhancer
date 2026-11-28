@@ -1,6 +1,6 @@
 import { POST as TWEET, PRIMARY, TEXT, MENU_TRIGGER as CARET, TIMESTAMP, PHOTO_IMAGE } from './x-dom.ts';
-import { encodeScreenshot, showScreenshotPreview } from './x-screenshot-preview.ts';
-import { renderPostScreenshot, screenshotPosts } from './x-screenshot.ts';
+import { encodeScreenshot, showScreenshotPreview, type ScreenshotScope } from './x-screenshot-preview.ts';
+import { renderPostScreenshot, screenshotPosts, screenshotThreadPosts } from './x-screenshot.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { createToast } from './toast.ts';
 import { resolveLocale } from './i18n.ts';
@@ -160,7 +160,11 @@ async function expandShowMore(tweet: HTMLElement): Promise<boolean> {
   return true;
 }
 
-export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } = {}): () => void {
+export function installXCopyMenu(options: {
+  getCopyFormat?: () => XCopyFormat;
+  getRounded?: () => boolean;
+  setRounded?: (value: boolean) => void;
+} = {}): () => void {
   const getLabels = () => {
     const chinese = resolveLocale(document.documentElement.lang || navigator.language) === 'zh';
     return chinese ? {
@@ -269,24 +273,28 @@ export function installXCopyMenu(options: { getCopyFormat?: () => XCopyFormat } 
       if (kind === 'image') {
         if (!current.tweet.isConnected || tweetPermalink(current.tweet) !== current.data.url) { toast.show(t.failed); return; }
         const allPosts = screenshotPosts(current.tweet, tweetPermalink);
-        const hasParent = allPosts.length > 1;
+        const thread = screenshotThreadPosts(current.tweet, tweetPermalink);
+        const postsByScope = { post: [current.tweet], parent: allPosts, thread };
+        const scope = allPosts.length > 1 ? 'parent' : 'post';
+        const ids: ScreenshotScope[] = ['post'];
+        if (scope === 'parent') ids.push('parent');
+        if (thread.length > allPosts.length) ids.push('thread');
         const shot = current.shot;
         const canvas = shot && !shot.observer.takeRecords().length &&
           shot.posts.length === allPosts.length && allPosts.every((post, index) => post === shot.posts[index])
           ? shot.canvas.catch(() => renderPostScreenshot(allPosts))
           : renderPostScreenshot(allPosts);
-        const tweetNode = current.tweet;
         const filename = screenshotFilename(current.data.url);
         dismiss(current);
         closePreview?.();
         closePreview = showScreenshotPreview(document, canvas, current.trigger, {
           onClose: () => { closePreview = undefined; },
           filename,
-          hasParent,
-          rerender: ({ hideMetrics, includeParent }) => {
-            const targetPosts = includeParent ? allPosts : [tweetNode];
-            return renderPostScreenshot(targetPosts, { hideMetrics });
-          },
+          scopes: ids.map(id => ({ id, count: postsByScope[id].length })),
+          scope,
+          rounded: options.getRounded?.(),
+          onRoundedChange: options.setRounded,
+          rerender: ({ hideMetrics, scope }) => renderPostScreenshot(postsByScope[scope], { hideMetrics }),
         });
         return;
       }

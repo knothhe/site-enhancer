@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { encodeScreenshot, showScreenshotPreview } from '../utils/x-screenshot-preview.ts';
+import { ScreenshotTooLargeError } from '../utils/x-screenshot.ts';
+import { encodeScreenshot, showScreenshotPreview, type ScreenshotScope } from '../utils/x-screenshot-preview.ts';
 
 function setup() {
   const win = new Window();
@@ -101,9 +102,9 @@ test('changing options discards stale exports and handles encoding failure on th
   let failOriginal!: BlobCallback, failUpdated!: BlobCallback;
   original.toBlob = callback => { failOriginal = callback; };
   updated.toBlob = callback => { failUpdated = callback; };
-  let rerenderOptions: { hideMetrics: boolean; includeParent: boolean } | undefined;
+  let rerenderOptions: { hideMetrics: boolean; scope: ScreenshotScope } | undefined;
   const close = showScreenshotPreview(doc, Promise.resolve(original), trigger, {
-    hasParent: true,
+    scopes: [{id:'post',count:1},{id:'parent',count:2}], scope:'parent',
     rerender: async opts => { rerenderOptions = opts; return updated; },
   });
   await Promise.resolve();
@@ -111,11 +112,11 @@ test('changing options discards stale exports and handles encoding failure on th
   assert.equal(dialog.hasAttribute('data-dark'), true);
   const toggles = dialog.querySelectorAll<HTMLButtonElement>('button[aria-pressed]');
   assert.equal(toggles.length, 2);
-  assert.equal(toggles[1].getAttribute('aria-pressed'),'true');
+  assert.equal(toggles[1].getAttribute('aria-pressed'),'false');
   toggles[0].click();
   assert.equal(toggles[0].getAttribute('aria-pressed'),'true');
   assert.equal(doc.querySelector('canvas'),original);
-  assert.deepEqual(rerenderOptions, { hideMetrics: true, includeParent: true });
+  assert.deepEqual(rerenderOptions, { hideMetrics: true, scope: 'parent' });
   failOriginal(null);
   await new Promise(setImmediate);
   const copy = doc.querySelector<HTMLButtonElement>('[data-copy]')!;
@@ -151,11 +152,11 @@ test('keyboard toggles reuse idle-rendered canvases and PNGs while the preview b
   }
   let idle!: () => void;
   Object.defineProperty(win,'requestIdleCallback',{value:(fn: () => void) => { idle = fn; }});
-  const initial = canvas('false/true');
+  const initial = canvas('false/parent');
   const close = showScreenshotPreview(doc,Promise.resolve(initial),trigger,{
-    hasParent:true,
-    rerender: async ({ hideMetrics, includeParent }) => {
-      const id = hideMetrics + '/' + includeParent;
+    scopes: [{id:'post',count:1},{id:'parent',count:2},{id:'thread',count:4}], scope:'parent',
+    rerender: async ({ hideMetrics, scope }) => {
+      const id = hideMetrics + '/' + scope;
       renders.push(id); return canvas(id);
     },
   });
@@ -167,13 +168,91 @@ test('keyboard toggles reuse idle-rendered canvases and PNGs while the preview b
   assert.match(dialog.querySelector('style')!.textContent!,/max-height:90dvh/);
   assert.equal(dialog.querySelector('h2'),null);
   assert.equal(dialog.querySelector('[data-copy]')?.textContent,'Copy');
-  for (const [key, expected] of [['h','true/true'],['p','true/false'],['h','false/false'],['p','false/true']]) {
+  assert.equal(dialog.querySelector('[role=radiogroup]')!.getAttribute('aria-label'), 'Screenshot scope');
+  const radios = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role=radio]'));
+  assert.deepEqual(radios.map(r => [r.textContent, r.tabIndex, r.getAttribute('aria-checked')]), [
+    ['This post', -1, 'false'], ['With original', 0, 'true'], ['Full thread · 4', -1, 'false'],
+  ]);
+  assert.deepEqual(renders, ['true/parent','false/post','true/post','false/thread']);
+  radios[1].focus();
+  radios[1].dispatchEvent(new win.KeyboardEvent('keydown',{key:'ArrowLeft', bubbles:true}) as unknown as Event);
+  assert.equal(doc.activeElement, radios[0]);
+  for (const [key, expected] of [['2','false/parent'],['h','true/parent'],['p','true/thread'],['1','true/post'],['h','false/post'],['3','false/thread'],['p','false/post']]) {
     dialog.dispatchEvent(new win.KeyboardEvent('keydown',{key,bubbles:true}) as unknown as Event);
     assert.ok(body!.querySelector('canvas'));
     await Promise.resolve();
     assert.equal(dialog.querySelector('.se-shot-body'),body);
     assert.equal(body!.querySelector<HTMLCanvasElement>('canvas:not([data-outgoing])')!.dataset.key,expected);
   }
-  assert.equal(renders.length,3); assert.equal(new Set(encodes).size,4); assert.equal(encodes.length,4);
+  assert.equal(renders.length,5); assert.equal(new Set(encodes).size,6); assert.equal(encodes.length,6);
   close(); await win.happyDOM.close();
+});
+
+test('a thread beyond the canvas cap reports the specific error and switching back restores export', async t => {
+  const { win, doc, trigger } = setup();
+  t.after(() => win.happyDOM.close());
+  const canvas = doc.createElement('canvas');
+  canvas.toBlob = cb => cb(new Blob());
+  const close = showScreenshotPreview(doc, Promise.resolve(canvas), trigger, {
+    scopes: [{id:'post', count:1}, {id:'thread', count:3}],
+    rerender: async () => { throw new ScreenshotTooLargeError(); },
+  });
+  const [post, thread] = doc.querySelectorAll<HTMLButtonElement>('[role=radio]');
+  thread.click();
+  await new Promise(setImmediate);
+  assert.equal(doc.querySelector('[role=status]')?.textContent, 'Thread is too long to capture');
+  assert.equal(doc.querySelector<HTMLButtonElement>('[data-copy]')!.disabled, true);
+  post.click();
+  await new Promise(setImmediate);
+  assert.equal(doc.querySelector<HTMLButtonElement>('[data-copy]')!.disabled, false);
+  assert.equal(doc.querySelector('.se-shot-toast')?.textContent, '');
+  close();
+});
+
+test('rounding reuses the source capture and exports the PNG of the displayed canvas', async t => {
+  const { win, doc, trigger } = setup();
+  t.after(() => win.happyDOM.close());
+  const canvas = doc.createElement('canvas');
+  const changes: boolean[] = [];
+  let draws = 0, renders = 0;
+  const blob = new Blob(['rounded']);
+  t.mock.method(win.HTMLCanvasElement.prototype, 'getContext', () => ({
+    beginPath() {}, roundRect() {}, clip() {}, drawImage(source: HTMLCanvasElement) {
+      assert.equal(source, canvas);
+      draws++;
+    },
+  }));
+  t.mock.method(win.HTMLCanvasElement.prototype, 'toBlob', (cb: BlobCallback) => cb(blob));
+  canvas.toBlob = cb => cb(new Blob(['square']));
+  let copied: Promise<Blob> | undefined;
+  Object.defineProperty(win, 'ClipboardItem', { value: class {
+    constructor(data: Record<string, Promise<Blob>>) { copied = data['image/png']; }
+  } });
+  Object.defineProperty(win.navigator.clipboard, 'write', { value: async () => {} });
+  const close = showScreenshotPreview(doc, Promise.resolve(canvas), trigger, {
+    rerender: async () => { renders++; return canvas; },
+    onRoundedChange: value => changes.push(value),
+  });
+  await Promise.resolve();
+  const dialog = doc.querySelector('dialog')!;
+  assert.equal(dialog.querySelector('[role=radiogroup]'), null);
+  assert.equal(doc.activeElement, dialog.querySelector('.se-shot-close'));
+  const press = async (key: string) => {
+    dialog.dispatchEvent(new win.KeyboardEvent('keydown', {key, bubbles:true}) as unknown as Event);
+    await Promise.resolve();
+  };
+  await press('2'); await press('p'); await press('r');
+  const rounded = dialog.querySelector('canvas:not([data-outgoing])');
+  assert.ok(rounded && rounded !== canvas);
+  assert.equal(dialog.querySelector('[title="Rounded corners (R)"]')?.getAttribute('aria-pressed'), 'true');
+  await press('c');
+  assert.equal(await copied, blob);
+  await press('r');
+  assert.equal(dialog.querySelector('canvas:not([data-outgoing])'), canvas);
+  await press('r');
+  assert.equal(dialog.querySelector('canvas:not([data-outgoing])'), rounded);
+  assert.equal(renders, 0);
+  assert.equal(draws, 1);
+  assert.deepEqual(changes, [true, false, true]);
+  close();
 });

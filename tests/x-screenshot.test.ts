@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { screenshotSvg, screenshotPosts, screenshotBackground, warmScreenshotFonts } from '../utils/x-screenshot.ts';
+import { screenshotSvg, screenshotPosts, screenshotThreadPosts, screenshotCornerRadius, screenshotBackground, warmScreenshotFonts } from '../utils/x-screenshot.ts';
 
 test('screenshot warmup shares in-flight CSS across posts using the same fonts and picks up different families', async t => {
   const win = new Window();
@@ -48,6 +48,43 @@ for (const [path, selected, expected] of [
     await win.happyDOM.close();
   });
 }
+
+test('conversation capture follows visible ancestors and only the connected reply branch', async t => {
+  const win = new Window({ url: 'https://x.com/alice/status/3' });
+  t.after(() => win.happyDOM.close());
+  const doc = win.document as unknown as Document;
+  const line = '<span aria-hidden="true" style="background-color:rgb(128,128,128)"></span>';
+  function post(id: number, above = false, below = false) {
+    return `<article data-testid="tweet" id="p${id}"><div>${above ? line : ''}<div data-post-avatar></div>${below ? line : ''}</div></article>`;
+  }
+  doc.body.innerHTML = `<aside>${post(0)}</aside><main data-testid="primaryColumn">${[
+    post(1), post(2), post(3), post(4, false, true), post(5, true), post(6, false, true),
+    post(7, true, true), post(8, true), post(9),
+  ].join('')}</main>`;
+  for (const el of doc.querySelectorAll('span')) {
+    const index = Number(el.closest('article')!.id.slice(1));
+    const y = index * 100 + (el.previousElementSibling ? 92 : 0);
+    el.getBoundingClientRect = () => new win.DOMRect(0, y, 2, 8) as DOMRect;
+  }
+  // A quote and a content divider are not conversation edges.
+  doc.querySelector('#p5')!.insertAdjacentHTML('beforeend', post(10, false, true));
+  doc.querySelector('#p9')!.insertAdjacentHTML('beforeend', line);
+  const collect = (id: number) => screenshotThreadPosts(doc.querySelector<HTMLElement>(`#p${id}`)!,
+    node => 'https://x.com/alice/status/' + node.id.slice(1)).map(node => Number(node.id.slice(1)));
+  assert.deepEqual(collect(2), [1, 2]);
+  assert.deepEqual(collect(3), [1, 2, 3]);
+  assert.deepEqual(collect(8), [1, 2, 3, 6, 7, 8]);
+  assert.deepEqual(collect(9), [1, 2, 3, 9]);
+  doc.querySelector('#p7')!.remove(); // Virtualized gap between two otherwise matching lines.
+  assert.deepEqual(collect(8), [1, 2, 3, 8]);
+  assert.deepEqual(collect(0), []);
+  win.history.replaceState({}, '', '/home');
+  assert.deepEqual(collect(8), []);
+});
+
+test('corner radius tracks capture scale and retains an eight-pixel minimum', () => {
+  assert.deepEqual([2, 1.5, 0.25].map(screenshotCornerRadius), [32, 24, 8]);
+});
 
 test('screenshot background follows the nearest opaque host background', async () => {
   const win = new Window();

@@ -35,15 +35,108 @@ export function warmScreenshotFonts(post: HTMLElement): Promise<string> {
   return css;
 }
 
+type Permalink = (node: Element) => string;
+
+function detailStatusId(tweet: HTMLElement) {
+  return tweet.ownerDocument.location.pathname.match(/^\/(?:\w+|i\/web)\/status\/(\d+)(?:\/|$)/)?.[1];
+}
+
+function focalIndex(posts: HTMLElement[], id: string, permalink: Permalink) {
+  return posts.findIndex(post => permalink(post).match(/\/status\/(\d+)$/)?.[1] === id);
+}
+
 /** Only attach the page's focal post when capturing a reply below it. */
-export function screenshotPosts(tweet: HTMLElement, permalink: (node: Element) => string): HTMLElement[] {
-  const doc = tweet.ownerDocument;
-  const id = doc.location.pathname.match(/^\/(?:\w+|i\/web)\/status\/(\d+)(?:\/|$)/)?.[1];
+export function screenshotPosts(tweet: HTMLElement, permalink: Permalink): HTMLElement[] {
+  const id = detailStatusId(tweet);
   if (!id) return [tweet];
-  const scope = tweet.closest(PRIMARY) ?? doc;
+  const scope = tweet.closest(PRIMARY) ?? tweet.ownerDocument;
   const posts = Array.from(scope.querySelectorAll<HTMLElement>(POST));
-  const parent = posts.find(post => permalink(post).match(/\/status\/(\d+)$/)?.[1] === id);
-  return parent && parent !== tweet && posts.indexOf(parent) < posts.indexOf(tweet) ? [parent, tweet] : [tweet];
+  const index = focalIndex(posts, id, permalink);
+  return index >= 0 && index < posts.indexOf(tweet) ? [posts[index], tweet] : [tweet];
+}
+
+// x-web puts empty painted spans immediately above/below data-post-avatar.
+// Legacy timelines wrap the avatar in a UserAvatar-Container. Check only the
+// avatar's own column, so quote cards and unrelated dividers cannot join rows.
+function avatarConnector(post: HTMLElement, above: boolean): DOMRect | undefined {
+  const avatar = post.querySelector<HTMLElement>('[data-post-avatar], [data-testid^="UserAvatar-Container-"]');
+  if (!avatar || avatar.closest(POST) !== post) return;
+  for (let node: Element | null = avatar; node && node !== post; node = node.parentElement) {
+    const sibling = above ? node.previousElementSibling : node.nextElementSibling;
+    if (sibling) {
+      if (!sibling.matches('div,span') || sibling.textContent?.trim()) return;
+      const line = sibling.firstElementChild ?? sibling;
+      if (line.childElementCount) return;
+      const style = post.ownerDocument.defaultView!.getComputedStyle(line);
+      const rect = line.getBoundingClientRect();
+      if (rect.width >= 1 && rect.width <= 3 && rect.height > rect.width &&
+          style.visibility !== 'hidden' && style.backgroundColor &&
+          !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor)) return rect;
+      return;
+    }
+    // x-web has an explicit rail. Legacy avatars can have extra wrappers.
+    if (avatar.hasAttribute('data-post-avatar') || node.parentElement?.childElementCount !== 1) return;
+  }
+}
+
+function connectedReplies(earlier: HTMLElement, later: HTMLElement) {
+  const end = avatarConnector(earlier, false);
+  const start = avatarConnector(later, true);
+  // The two halves meet at a row boundary. A gap can mean virtualized rows.
+  return end && start && Math.abs(end.left - start.left) <= 1 && Math.abs(end.bottom - start.top) <= 2;
+}
+
+/** Visible ancestors followed by the contiguous, connected tail ending at the target. */
+export function screenshotThreadPosts(tweet: HTMLElement, permalink: Permalink): HTMLElement[] {
+  const column = tweet.closest(PRIMARY);
+  const id = detailStatusId(tweet);
+  if (!column || !id) return [];
+  const posts = Array.from(column.querySelectorAll<HTMLElement>(POST))
+    .filter(post => !post.parentElement?.closest(POST));
+  const focal = focalIndex(posts, id, permalink);
+  const target = posts.indexOf(tweet);
+  if (focal < 0 || target < 0) return [];
+  if (target <= focal) return posts.slice(0, target + 1);
+  let start = target;
+  while (start > focal + 1 && connectedReplies(posts[start - 1], posts[start])) {
+    start--;
+  }
+  return [...posts.slice(0, focal + 1), ...posts.slice(start, target + 1)];
+}
+
+export class ScreenshotTooLargeError extends Error {}
+
+const captureScales = new WeakMap<HTMLCanvasElement, number>();
+const roundedScreenshots = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+
+export function screenshotCornerRadius(scale: number) {
+  return Math.max(8, 16 * scale);
+}
+
+export function roundScreenshot(source: HTMLCanvasElement): HTMLCanvasElement {
+  const cached = roundedScreenshots.get(source);
+  if (cached) return cached;
+  const canvas = source.ownerDocument.createElement('canvas');
+  const { width, height } = source;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Canvas unavailable');
+  const radius = Math.min(screenshotCornerRadius(captureScales.get(source) ?? 2), width / 2, height / 2);
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(0, 0, width, height, radius);
+  else {
+    ctx.moveTo(radius, 0);
+    ctx.arcTo(width, 0, width, height, radius);
+    ctx.arcTo(width, height, 0, height, radius);
+    ctx.arcTo(0, height, 0, 0, radius);
+    ctx.arcTo(0, 0, width, 0, radius);
+    ctx.closePath();
+  }
+  ctx.clip();
+  ctx.drawImage(source, 0, 0);
+  roundedScreenshots.set(source, canvas);
+  return canvas;
 }
 
 export function screenshotBackground(node: HTMLElement): string {
@@ -227,12 +320,12 @@ export async function renderPostScreenshot(posts: HTMLElement[], options: Screen
     await image.decode();
     // Match html-to-image's 2x raster size and 16384px per-image dimension cap.
     const scale = Math.min(2, 16384 / Math.max(image.naturalWidth, image.naturalHeight));
-    return { image, width: Math.floor(image.naturalWidth * scale), height: Math.floor(image.naturalHeight * scale) };
+    return { image, scale, width: Math.floor(image.naturalWidth * scale), height: Math.floor(image.naturalHeight * scale) };
   }));
   const padding = 48, gap = 32; // 24px outer margin and 16px between posts at 2x.
   const width = Math.max(...captures.map(capture => capture.width)) + padding * 2;
   const height = captures.reduce((sum, capture) => sum + capture.height, 0) + padding * 2 + gap * (captures.length - 1);
-  if (width * height > 64_000_000) throw new Error('Screenshot too large');
+  if (width * height > 64_000_000) throw new ScreenshotTooLargeError('Screenshot too large');
   const canvas = doc.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -248,5 +341,6 @@ export async function renderPostScreenshot(posts: HTMLElement[], options: Screen
     context.drawImage(capture.image, padding, y, capture.width, capture.height);
     y += capture.height + gap;
   }
+  captureScales.set(canvas, Math.min(...captures.map(capture => capture.scale)));
   return canvas;
 }

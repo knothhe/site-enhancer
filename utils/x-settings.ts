@@ -39,3 +39,4 @@ export const xThemeSetting = setting<XTheme>('local:xTheme', isXTheme, 'original
 export const xCopyFormatSetting = setting<XCopyFormat>('local:xCopyFormat', isXCopyFormat, 'default');
 /** Automatically switch the Home timeline to the Following tab when entering /home. */
 export const xDefaultFollowingSetting = booleanSetting('local:xDefaultFollowing', false);
+export const xScreenshotRoundedSetting = booleanSetting('local:xScreenshotRounded', false);
