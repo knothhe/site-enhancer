@@ -5,7 +5,7 @@ import { DETAIL_READY_MESSAGE, observeDetailReady } from '../utils/x-detail-read
 import { test, beforeEach, afterEach, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { Window } from 'happy-dom';
-import { activeWidthPreset, adjustedFeedShare, columnGeometry, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
+import { activeWidthPreset, adjustedFeedShare, columnGeometry, gutterPixels, DEFAULT_COLUMNS, parseColumnWidths, detailUrl, postPermalink, nativeVideoUrl, installXColumns, COLUMNS_WIDTH_KEY, COLUMNS_CSS, STRUCTURE_GRACE_MS } from '../utils/x-columns.ts';
 
 import { installVideoPlayGate } from '../utils/x-video-gate.ts';
 import { QUOTE_REQUEST, QUOTE_URL, quoteComponentPath, normalizeQuoteUrl } from '../utils/x-quote.ts';
@@ -47,10 +47,18 @@ test('X layer overlays lift the app root above the fixed detail panel only while
 });
 test('width preferences reject invalid values and preserve valid explicit values', () => {
   for (const value of [null, {}, { nav: 0, share: .5 }, { nav: 200, share: Infinity }, { nav: 200, share: .01 }]) {
-    assert.deepEqual(parseColumnWidths(value), { nav: 200, share: .5 });
+    assert.deepEqual(parseColumnWidths(value), DEFAULT_COLUMNS);
   }
-  assert.deepEqual(parseColumnWidths({ nav: 200, share: .52 }), { nav: 200, share: .52 });
-  assert.deepEqual(parseColumnWidths({ nav: 88, share: .4 }), { nav: 88, share: .4 });
+  assert.deepEqual(parseColumnWidths({ nav: 88, share: .4 }), { ...DEFAULT_COLUMNS, nav: 88, share: .4 });
+  const stored = { nav: 240, share: .52, feedGutter: .04, detailGutter: .12 };
+  assert.deepEqual(parseColumnWidths(stored), stored);
+  assert.deepEqual(parseColumnWidths({ ...stored, detailGutter: '.12' }), { ...stored, detailGutter: 0 });
+  assert.deepEqual(parseColumnWidths({ ...stored, feedGutter: .2 }), { ...stored, feedGutter: 0 });
+});
+test('side padding rounds each level and preserves 360px of content on narrow panes', () => {
+  for (const [width, expected] of [[888, [0, 36, 71, 107]], [401, [0, 16, 20, 20]], [360, [0, 0, 0, 0]], [320, [0, 0, 0, 0]]] as const) {
+    assert.deepEqual([0, .04, .08, .12].map(level => gutterPixels(level, width)), expected);
+  }
 });
 test('every supported viewport preserves minimum reading widths and fills available space', () => {
   for (const width of [1080, 1080.2, 1200, 1440, 1920, 2560]) {
@@ -82,33 +90,80 @@ test('drag snaps within 12px of rendered presets, keyboard movement stays contin
   assert.equal(adjustedFeedShare(800, 360, true), .4);
 });
 
-test('preset menu preserves navigation, syncs stored selections, and consumes its own Escape', () => {
+test('layout dialog applies live changes, traps focus by group, and restores defaults', () => {
   localStorage.setItem(COLUMNS_WIDTH_KEY, JSON.stringify({ nav: 240, share: .52 }));
+  localStorage.setItem('site-enhancer:x-nav-collapsed', 'true');
   start();
   click('time');
-  const selector = '.se-column-icon[aria-haspopup="menu"]';
+  const selector = '.se-column-icon[aria-haspopup="dialog"]';
   const trigger = document.querySelector<HTMLButtonElement>(selector)!;
   key(trigger, { key: 'ArrowDown' });
-  const rows = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
-  assert.equal(document.activeElement, rows[0]);
-  assert.ok(rows.every(row => row.getAttribute('aria-checked') === 'false'));
-  key(rows[0], { key: 'ArrowUp' });
-  assert.equal(document.activeElement?.getAttribute('role'), 'menuitem');
-  key(document.activeElement, { key: 'ArrowUp' });
-  key(document.activeElement, { key: 'Enter' });
-  assert.deepEqual(JSON.parse(localStorage.getItem(COLUMNS_WIDTH_KEY)!), { nav: 240, share: .6 });
-  assert.equal(document.activeElement, trigger);
-  click(selector);
-  assert.equal(document.activeElement, rows[2]);
-  win.dispatchEvent(new win.StorageEvent('storage', { key: COLUMNS_WIDTH_KEY, newValue: '{"nav":240,"share":0.5}' }));
-  assert.equal(rows[1].getAttribute('aria-checked'), 'true');
-  key(rows[2], { key: 'Escape' });
+  const dialog = document.querySelector('.se-width-menu[role="dialog"]')!;
+  const [presets, feed, detail] = [...dialog.querySelectorAll('[role="radiogroup"]')]
+    .map(group => [...group.querySelectorAll<HTMLButtonElement>('[role="radio"]')]);
+  const reset = dialog.querySelector<HTMLButtonElement>('.se-width-reset')!;
+  const press = (value: string, shiftKey = false) => key(document.activeElement, { key: value, shiftKey });
+  assert.equal(document.activeElement, presets[0]);
+  assert.ok(presets.every(row => row.getAttribute('aria-checked') === 'false'));
+  press('ArrowUp');
+  assert.equal(document.activeElement, presets[2]);
+  assert.equal(presets[2].getAttribute('aria-checked'), 'true');
+  press('Tab');
+  assert.equal(document.activeElement, feed[0]);
+  press('ArrowLeft');
+  press('Tab');
+  assert.equal(document.activeElement, detail[0]);
+  press('ArrowRight');
+  press('Tab');
+  assert.equal(document.activeElement, reset);
+  press('Tab');
+  assert.equal(document.activeElement, presets[2]);
+  press('Tab', true);
+  assert.equal(document.activeElement, reset);
+  assert.deepEqual(JSON.parse(localStorage.getItem(COLUMNS_WIDTH_KEY)!), { nav: 240, share: .6, feedGutter: .12, detailGutter: .04 });
+  press(' ');
+  assert.equal(document.activeElement, reset);
+  assert.deepEqual(JSON.parse(localStorage.getItem(COLUMNS_WIDTH_KEY)!), DEFAULT_COLUMNS);
+  assert.equal(localStorage.getItem('site-enhancer:x-nav-collapsed'), 'false');
+  assert.equal(feed[0].tabIndex, 0);
+  const stored = { nav: 200, share: .4, feedGutter: .08, detailGutter: .12 };
+  win.dispatchEvent(new win.StorageEvent('storage', { key: COLUMNS_WIDTH_KEY, newValue: JSON.stringify(stored) }));
+  assert.equal(feed[2].getAttribute('aria-checked'), 'true');
+  assert.equal(detail[3].tabIndex, 0);
+  assert.equal(document.documentElement.style.getPropertyValue('--se-feed-gutter'), '40px');
+  press('Escape');
   assert.equal(trigger.getAttribute('aria-expanded'), 'false');
   assert.equal(document.activeElement, trigger);
   assert.ok(document.querySelector('iframe'));
+  key(trigger, { key: 'Enter' });
+  assert.equal(document.activeElement, presets[0]);
+  click(selector);
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false');
   click(selector);
   click('[data-testid="tweetText"]');
   assert.equal(trigger.getAttribute('aria-expanded'), 'false');
+});
+
+test('new and cached detail documents receive the live gutter without replacing frames', t => {
+  start();
+  const first = selectDetail(123);
+  const firstWindow = attachReadyDetail(t, first, first.src);
+  signalDetail(firstWindow);
+  click('.se-column-icon[aria-haspopup="dialog"]');
+  const choose = (level: number) => document.querySelectorAll('.se-segments')[1].querySelectorAll('button')[level].click();
+  choose(2);
+  const gutter = (view: Window) => view.document.documentElement.style.getPropertyValue('--se-detail-gutter');
+  assert.equal(gutter(firstWindow), '0.08');
+  const second = selectDetail(456);
+  const secondWindow = attachReadyDetail(t, second, second.src);
+  signalDetail(secondWindow);
+  assert.equal(gutter(secondWindow), '0.08');
+  click('.se-column-icon[aria-haspopup="dialog"]');
+  choose(3);
+  assert.equal(gutter(firstWindow), '0.12');
+  assert.equal(gutter(secondWindow), '0.12');
+  assert.equal(first.hidden, true);
+  assert.equal(document.querySelector('iframe:not([hidden])'), second);
 });
 
 test('only same-origin complete post routes are eligible for embedded details', () => {
@@ -539,7 +594,7 @@ test('browsing a detail photo to its video stays in the gallery', async t => {
   assert.equal(document.querySelector('iframe:not([hidden])'), frame);
 });
 
-test('subtitle action navigates and restores only the addressed attachment once metadata arrives', async t => {
+test('subtitle action opens a new tab without navigating and restores only the addressed attachment', async t => {
   document.documentElement.lang = 'en';
   start();
   const frame = selectDetail(123);
@@ -548,12 +603,18 @@ test('subtitle action navigates and restores only the addressed attachment once 
   player.insertAdjacentHTML('beforebegin', '<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/first"></div>');
   signalDetail(detail);
   const navigate = t.mock.method(window.location, 'assign', () => {});
+  const opened = t.mock.method(window, 'open', () => null);
   video.currentTime = 41.5;
   player.querySelector<HTMLButtonElement>('[aria-label="Full screen"]')!.click();
-  player.querySelector<HTMLButtonElement>('.se-subtitle-post')!.click();
+  const subtitle = player.querySelector<HTMLButtonElement>('.se-subtitle-post')!;
+  assert.equal(subtitle.textContent, 'Open in new tab (for subtitles)');
+  void video.play();
+  subtitle.click();
   const destination = 'https://x.com/alice/status/123/video/2';
-  assert.deepEqual(navigate.mock.calls.map(call => call.arguments[0]), [destination]);
-  assert.equal(win.sessionStorage.length, 1);
+  assert.deepEqual(opened.mock.calls.map(call => call.arguments), [[destination, '_blank', 'noopener']]);
+  assert.equal(navigate.mock.callCount(), 0);
+  assert.equal(video.paused, true);
+  assert.equal(win.localStorage.length, 1);
 
   columns!.remove();
   columns = undefined;
@@ -568,7 +629,7 @@ test('subtitle action navigates and restores only the addressed attachment once 
   matching.dispatchEvent(new win.Event('loadedmetadata') as unknown as Event);
   assert.equal(matching.currentTime, 41.5);
   assert.equal(other.currentTime, 0);
-  assert.equal(win.sessionStorage.length, 0);
+  assert.equal(win.localStorage.length, 0);
   matching.currentTime = 5;
   matching.dispatchEvent(new win.Event('loadedmetadata') as unknown as Event);
   assert.equal(matching.currentTime, 5);
@@ -1961,9 +2022,10 @@ test('detail multi-video post prioritizes first focal video, resolves reply dest
   assert.equal(prepared.length, countBeforeHover);
 
   const navigate = t.mock.method(window.location, 'assign', () => {});
+  const opened = t.mock.method(window, 'open', () => null);
   reply.player.querySelector<HTMLButtonElement>('[data-site-enhancer-video-expand]')!
     .dispatchEvent(new detail.MouseEvent('click', { bubbles: true, button: 0 }) as unknown as Event);
-  assert.equal(navigate.mock.callCount(), 0);
   reply.player.querySelector<HTMLButtonElement>('.se-subtitle-post')!.click();
-  assert.equal(navigate.mock.calls[0].arguments[0], 'https://x.com/carol/status/456');
+  assert.equal(opened.mock.calls[0].arguments[0], 'https://x.com/carol/status/456');
+  assert.equal(navigate.mock.callCount(), 0);
 });

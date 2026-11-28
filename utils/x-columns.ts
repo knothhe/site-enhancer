@@ -13,14 +13,24 @@ export const COLUMNS_MIN_WIDTH = 1080;
 export const COLUMNS_WIDTH_KEY = 'site-enhancer:x-columns-widths';
 export const COLUMNS_COLLAPSED_KEY = 'site-enhancer:x-nav-collapsed';
 export const DETAIL_FRAME_NAME = 'site-enhancer-x-detail';
-export type ColumnWidths = { nav: number; share: number };
-export const DEFAULT_COLUMNS: ColumnWidths = { nav: 200, share: .5 };
+export type ColumnWidths = { nav: number; share: number; feedGutter: number; detailGutter: number };
+export const DEFAULT_COLUMNS: ColumnWidths = { nav: 200, share: .5, feedGutter: 0, detailGutter: 0 };
+
+const gutterLevels = [
+  { label: 'none', value: 0 }, { label: 'small', value: .04 },
+  { label: 'medium', value: .08 }, { label: 'large', value: .12 },
+] as const;
+
+export function gutterPixels(level: number, paneWidth: number) {
+  return Math.min(Math.round(level * paneWidth), Math.max(0, Math.floor((paneWidth - 360) / 2)));
+}
 
 export function parseColumnWidths(value: unknown): ColumnWidths {
   if (typeof value !== 'object' || value === null) return { ...DEFAULT_COLUMNS };
-  const { nav, share } = value as ColumnWidths;
+  const { nav, share, feedGutter, detailGutter } = value as ColumnWidths;
+  const gutter = (input: unknown) => gutterLevels.find(level => level.value === input)?.value ?? 0;
   return Number.isFinite(nav) && nav >= 88 && nav <= 280 && Number.isFinite(share) && share >= .25 && share <= .75
-    ? { nav, share } : { ...DEFAULT_COLUMNS };
+    ? { nav, share, feedGutter: gutter(feedGutter), detailGutter: gutter(detailGutter) } : { ...DEFAULT_COLUMNS };
 }
 const widthPresets = [
   { label: 'detailFocus', share: .4, parts: [2, 3] },
@@ -47,7 +57,7 @@ export function adjustedFeedShare(available: number, feed: number, snap: boolean
 
 /** How long a missing timeline column is treated as a route change rather than an unsupported page. */
 export const STRUCTURE_GRACE_MS = 1500;
-export function columnGeometry(width: number, preference: ColumnWidths) {
+export function columnGeometry(width: number, preference: Pick<ColumnWidths, 'nav' | 'share'>) {
   const nav = Math.min(preference.nav, Math.max(88, width - 800));
   const available = width - nav;
   const feed = feedWidth(available, preference.share);
@@ -104,7 +114,7 @@ main[role="main"],main[role="main"]>div,div:has(>[data-testid="primaryColumn"]),
 [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
 [data-testid="primaryColumn"]>div>div:has([data-testid="app-bar-back"]):not(:has(section)){display:none!important}
 [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{border-bottom-color:var(--se-x-border,rgba(127,127,127,.16))!important}
-main[role="main"] [data-testid="primaryColumn"]{max-width:760px!important;margin-inline:auto!important}
+[data-testid="primaryColumn"],${WEB} div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:clamp(0px,round(nearest,calc(var(--se-detail-gutter,0) * 100%),1px),round(down,calc((100% - 360px) / 2),1px))!important}
 html{scrollbar-width:thin;scrollbar-color:#8885 transparent}
 `;
 const SCOPE = ':root[data-site-enhancer-columns]';
@@ -128,6 +138,7 @@ ${W}:has(main + aside) #site-enhancer-columns [data-state="empty"]{display:none}
 ${W} body > [data-base-ui-portal]{position:relative;z-index:6}
 ${SCOPE}{--se-column-line:var(--se-x-border,rgba(127,127,127,.16));scrollbar-width:thin;scrollbar-color:#8885 transparent}
 ${SCOPE} [data-site-enhancer-column-header]{border-bottom-color:var(--se-column-line)!important}
+${SCOPE} [data-testid="primaryColumn"],${row} > div.grid > main:not(:has([data-testid="primaryColumn"])){box-sizing:border-box!important;padding-inline:var(--se-feed-gutter,0px)!important}
 ${SCOPE} [data-testid="primaryColumn"]{border-left:0!important;border-right:0!important}
 ${SCOPE} [data-testid="cellInnerDiv"]:has(article[data-testid="tweet"])>div{border-bottom-color:var(--se-column-line)!important}
 ${SCOPE} header[role="banner"]{width:var(--se-nav)!important;flex:0 0 var(--se-nav)!important}
@@ -186,7 +197,7 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns button:disabled:not(.se-column-title){opacity:.28}
 #site-enhancer-columns button:not(:disabled):hover,#site-enhancer-columns a:hover,#site-enhancer-columns .se-column-icon[aria-expanded="true"]{background:color-mix(in srgb,currentColor 7%,transparent);color:var(--se-x-text,var(--se-native-text,#0f1419))}
 #site-enhancer-columns svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
-#site-enhancer-columns .se-width-menu{position:absolute;z-index:2;top:calc(var(--se-column-header-height,54px) - 4px);width:232px;padding:6px;border:1px solid var(--se-column-line);border-radius:14px;background:var(--se-x-bg,var(--se-native-bg,#fff));box-shadow:0 8px 28px #0002,0 1px 3px #0001;--se-menu-muted:var(--se-x-muted,var(--se-native-muted,#65717b))}
+#site-enhancer-columns .se-width-menu{position:absolute;z-index:2;top:calc(var(--se-column-header-height,54px) - 4px);width:264px;padding:6px;border:1px solid var(--se-column-line);border-radius:14px;background:var(--se-x-bg,var(--se-native-bg,#fff));box-shadow:0 8px 28px #0002,0 1px 3px #0001;--se-menu-muted:var(--se-x-muted,var(--se-native-muted,#65717b))}
 #site-enhancer-columns[data-dark] .se-width-menu{box-shadow:0 0 0 1px #ffffff14,0 8px 28px #000a}
 #site-enhancer-columns .se-width-header{font-size:12px;font-weight:600;color:var(--se-menu-muted);padding:6px 10px 4px}
 #site-enhancer-columns .se-width-menu button{display:flex;align-items:center;gap:10px;padding:8px 10px;width:100%;text-align:start}
@@ -201,7 +212,12 @@ ${SCOPE}[data-site-enhancer-compact-nav] header[role="banner"] [data-testid="Sid
 #site-enhancer-columns .se-width-check svg{width:16px;height:16px;stroke-width:2}
 #site-enhancer-columns [aria-checked="false"] .se-width-check svg{display:none}
 #site-enhancer-columns .se-width-line{height:1px;background:var(--se-column-line);margin:6px 4px}
-#site-enhancer-columns .se-width-menu [role="menuitem"]{color:var(--se-menu-muted)}
+#site-enhancer-columns .se-gutter-row{display:flex;align-items:center;gap:10px;padding:5px 10px}
+#site-enhancer-columns .se-segments{display:flex;padding:2px;border-radius:8px;background:color-mix(in srgb,currentColor 7%,transparent)}
+#site-enhancer-columns .se-segments button{justify-content:center;width:auto;min-width:30px;height:24px;padding:0 4px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--se-menu-muted)}
+#site-enhancer-columns .se-width-menu .se-segments button[aria-checked="true"]{background:var(--se-x-bg,#fff);color:inherit;font-weight:600;box-shadow:0 1px 2px #0003}
+#site-enhancer-columns[data-dark] .se-width-menu .se-segments button[aria-checked="true"]{background:color-mix(in srgb,currentColor 18%,transparent);box-shadow:none}
+#site-enhancer-columns .se-width-reset{color:var(--se-menu-muted)}
 #site-enhancer-columns :focus-visible,.se-column-divider:focus-visible{outline:2px solid var(--se-x-accent,#1d9bf0);outline-offset:2px}
 #site-enhancer-columns iframe{width:100%;flex:1;min-height:0;border:0;background:inherit}
 #site-enhancer-columns iframe[style*="visibility: hidden"]{position:absolute;top:var(--se-column-header-height,54px);height:calc(100% - var(--se-column-header-height,54px))}
@@ -237,8 +253,8 @@ const zh = {
   loading: '正在加载详情…', loadingHint: '时间线会保留在原处。',
   frameTitle: '推文详情和回复', panel: '推文详情', title: '推文详情',
   failed: '详情暂时无法加载', failedHint: '请重新加载扩展和页面后重试，或在新标签页查看。', retryHint: '可以重试，或在新标签页查看。',
-  newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复默认栏宽', close: '关闭',
-  widths: '栏宽', ratio: '时间线 : 详情', detailFocus: '详情优先', balanced: '均分', timelineFocus: '列表优先',
+  newTab: '新标签页', copyLink: '复制链接', copiedLink: '已复制链接', retry: '重试', search: '搜索', back: '后退', forward: '前进', reset: '恢复默认布局', close: '关闭',
+  layout: '布局', ratio: '栏宽 · 时间线 : 详情', margins: '两侧留白', feedGutter: '时间线', detailGutter: '详情', none: '无', small: '小', medium: '中', large: '大', detailFocus: '详情优先', balanced: '均分', timelineFocus: '列表优先',
   resizeNav: '调整导航栏宽度', resizeDetail: '调整时间线和详情宽度', resizeHint: '拖动调整宽度，靠近预设比例时吸附；方向键微调；双击恢复默认',
 };
 
@@ -252,8 +268,8 @@ export const COLUMNS_LABELS: Record<Locale, typeof zh> = {
     loading: 'Loading post…', loadingHint: 'The timeline stays where it is.',
     frameTitle: 'Post and replies', panel: 'Post details', title: 'Post',
     failed: 'Couldn’t load the post', failedHint: 'Reload the extension and the page, then try again, or open it in a new tab.', retryHint: 'Try again, or open it in a new tab.',
-    newTab: 'New tab', copyLink: 'Copy link', copiedLink: 'Link copied', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset widths', close: 'Close',
-    widths: 'Column widths', ratio: 'Timeline : Post', detailFocus: 'Detail focus', balanced: 'Balanced', timelineFocus: 'Timeline focus',
+    newTab: 'New tab', copyLink: 'Copy link', copiedLink: 'Link copied', retry: 'Retry', search: 'Search', back: 'Back', forward: 'Forward', reset: 'Reset layout', close: 'Close',
+    layout: 'Layout', ratio: 'Widths · Timeline : Post', margins: 'Side margins', feedGutter: 'Timeline', detailGutter: 'Post', none: 'None', small: 'S', medium: 'M', large: 'L', detailFocus: 'Detail focus', balanced: 'Balanced', timelineFocus: 'Timeline focus',
     resizeNav: 'Resize navigation', resizeDetail: 'Resize timeline and post', resizeHint: 'Drag to resize (snaps to presets); arrow keys to nudge; double-click to reset',
   },
 };
@@ -599,6 +615,7 @@ export function installXColumns(options: {
             style.textContent = DETAIL_FRAME_CSS;
             (doc.head ?? doc.documentElement).append(style);
           }
+          doc.documentElement.style.setProperty('--se-detail-gutter', String(widths.detailGutter));
           const primary = doc.querySelector(PRIMARY_COLUMN);
           if (primary && (primary.querySelector(POST) ||
             (Date.now() - started > 1500 && !primary.querySelector('[role="progressbar"]') && (primary.textContent?.length ?? 0) > 50))) {
@@ -672,39 +689,51 @@ export function installXColumns(options: {
   function createWidthControl() {
     const menu = document.createElement('div');
     menu.className = 'se-width-menu';
-    menu.setAttribute('role', 'menu');
-    const heading = document.createElement('div');
-    heading.className = 'se-width-header';
-    heading.id = 'se-width-heading';
-    menu.setAttribute('aria-labelledby', heading.id);
-    localized(() => { heading.textContent = t.ratio; });
-    menu.append(heading);
-    const trigger = button('widths', () => menu.isConnected ? close() : open(), 'widths');
-    trigger.setAttribute('aria-haspopup', 'menu');
+    menu.setAttribute('role', 'dialog');
+    localized(() => menu.setAttribute('aria-label', t.layout));
+    const trigger = button('layout', () => menu.isConnected ? close() : open(), 'widths');
+    trigger.setAttribute('aria-haspopup', 'dialog');
     trigger.setAttribute('aria-expanded', 'false');
 
-    function row(label: Label, action: () => void) {
+    function labelElement(label: Label, className: string) {
+      const text = document.createElement('span');
+      text.className = className;
+      localized(() => { text.textContent = t[label]; });
+      return text;
+    }
+    function group(label: Label) {
+      const element = document.createElement('div');
+      element.setAttribute('role', 'radiogroup');
+      localized(() => element.setAttribute('aria-label', t[label]));
+      return element;
+    }
+    function heading(label: Label) {
+      const element = document.createElement('div');
+      element.className = 'se-width-header';
+      localized(() => { element.textContent = t[label]; });
+      menu.append(element);
+    }
+    function row(parent: HTMLElement, label: Label, action: () => void) {
       const item = document.createElement('button');
       item.type = 'button';
-      item.tabIndex = -1;
       const diagram = document.createElement('span');
       diagram.className = 'se-width-diagram';
-      const name = document.createElement('span');
-      name.className = 'se-width-label';
-      localized(() => { name.textContent = t[label]; });
-      item.append(diagram, name);
-      item.addEventListener('click', () => { action(); close(true); });
-      menu.append(item);
+      item.append(diagram, labelElement(label, 'se-width-label'));
+      item.addEventListener('click', action);
+      parent.append(item);
       return { item, diagram };
     }
-
+    function setWidth(key: 'share' | 'feedGutter' | 'detailGutter', value: number) {
+      widths[key] = value;
+      renderWidths();
+      save();
+    }
+    heading('ratio');
+    const presets = group('ratio');
+    menu.append(presets);
     const items = widthPresets.map(preset => {
-      const { item, diagram } = row(preset.label, () => {
-        widths.share = preset.share;
-        renderWidths();
-        save();
-      });
-      item.setAttribute('role', 'menuitemradio');
+      const { item, diagram } = row(presets, preset.label, () => setWidth('share', preset.share));
+      item.setAttribute('role', 'radio');
       for (const part of preset.parts) {
         const column = document.createElement('i');
         column.style.flex = String(part);
@@ -723,26 +752,47 @@ export function installXColumns(options: {
     line.className = 'se-width-line';
     line.setAttribute('role', 'separator');
     menu.append(line);
-    const restore = row('reset', reset);
-    restore.item.setAttribute('role', 'menuitem');
+    heading('margins');
+    const gutterGroups = (['feedGutter', 'detailGutter'] as const).map(key => {
+      const container = document.createElement('div');
+      container.className = 'se-gutter-row';
+      const segments = group(key);
+      segments.className = 'se-segments';
+      const radios = gutterLevels.map(({ label, value }) => {
+        const radio = button(label, () => setWidth(key, value));
+        radio.setAttribute('role', 'radio');
+        localized(() => { radio.title = `${t[label]} · ${value * 100}%`; });
+        segments.append(radio);
+        return radio;
+      });
+      container.append(labelElement(key, 'se-width-label'), segments);
+      menu.append(container);
+      return { key, radios };
+    });
+    menu.append(line.cloneNode());
+    const restore = row(menu, 'reset', reset);
+    restore.item.className = 'se-width-reset';
     restore.diagram.append(icon('reset'));
-    items.push(restore.item);
 
+    function syncGroup(radios: HTMLButtonElement[], checked: number) {
+      radios.forEach((radio, index) => {
+        radio.setAttribute('aria-checked', String(index === checked));
+        radio.tabIndex = index === Math.max(0, checked) ? 0 : -1;
+      });
+    }
     function sync() {
       const active = activeWidthPreset(widths.share);
-      widthPresets.forEach((preset, i) => items[i].setAttribute('aria-checked', String(preset === active)));
-    }
-    function focusItem(item: HTMLButtonElement) {
-      for (const candidate of items) candidate.tabIndex = candidate === item ? 0 : -1;
-      item.focus();
+      syncGroup(items, active ? widthPresets.indexOf(active) : -1);
+      for (const { key, radios } of gutterGroups) {
+        syncGroup(radios, gutterLevels.findIndex(level => level.value === widths[key]));
+      }
+      if (menu.isConnected) menu.style.left = `${Math.max(8, trigger.offsetLeft + trigger.offsetWidth - menu.offsetWidth)}px`;
     }
     function open() {
       trigger.after(menu);
-      // Right-align with the trigger; the fixed panel is the offset parent.
-      menu.style.left = `${Math.max(8, trigger.offsetLeft + trigger.offsetWidth - menu.offsetWidth)}px`;
       trigger.setAttribute('aria-expanded', 'true');
       sync();
-      focusItem(items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0]);
+      items.find(radio => radio.tabIndex === 0)!.focus();
     }
     function close(returnToTrigger = false) {
       menu.remove();
@@ -755,15 +805,24 @@ export function installXColumns(options: {
       open();
     });
     menu.addEventListener('keydown', event => {
-      const index = items.indexOf(document.activeElement as HTMLButtonElement);
-      switch (event.key) {
-        case 'ArrowDown': case 'ArrowUp':
-          focusItem(items[(index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]);
-          break;
-        case 'Escape': close(true); break;
-        case 'Enter': case ' ': items[index]?.click(); break;
-        case 'Tab': close(true); return;
-        default: return;
+      const focused = document.activeElement as HTMLButtonElement;
+      if (event.key === 'Tab') {
+        const stops = [...menu.querySelectorAll<HTMLButtonElement>('[role="radio"][tabindex="0"]'), restore.item];
+        const index = stops.findIndex(stop => stop === focused || stop.parentElement === focused.parentElement);
+        stops[(index + (event.shiftKey ? -1 : 1) + stops.length) % stops.length].focus();
+      } else if (event.key === 'Escape') {
+        close(true);
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        focused.click();
+      } else {
+        const group = focused.closest('[role="radiogroup"]');
+        if (!group || !['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) return;
+        const radios = Array.from(group.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+        const index = radios.indexOf(focused);
+        const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+        const next = radios[(index + (forward ? 1 : -1) + radios.length) % radios.length];
+        next.focus();
+        next.click();
       }
       event.preventDefault();
       event.stopPropagation();
@@ -993,6 +1052,8 @@ export function installXColumns(options: {
     const { nav, feed, detail } = columnGeometry(width, collapsed || nativeCompact ? { ...widths, nav: 88 } : widths);
     root.style.setProperty('--se-nav', `${nav}px`);
     root.style.setProperty('--se-feed', `${feed}px`);
+    root.style.setProperty('--se-feed-gutter', `${gutterPixels(widths.feedGutter, feed)}px`);
+    for (const doc of frameDocuments.values()) doc.documentElement.style.setProperty('--se-detail-gutter', String(widths.detailGutter));
     root.style.setProperty('--se-detail', `${detail}px`);
     root.toggleAttribute('data-site-enhancer-compact-nav', nav < 180);
     renderToggle();
@@ -1080,7 +1141,7 @@ export function installXColumns(options: {
     localize = [];
     lastStatus = undefined;
     for (const name of ['data-site-enhancer-columns', 'data-site-enhancer-compact-nav', 'data-site-enhancer-resizing']) root.removeAttribute(name);
-    for (const name of ['--se-native-bg', '--se-nav', '--se-feed', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
+    for (const name of ['--se-native-bg', '--se-nav', '--se-feed', '--se-feed-gutter', '--se-detail', '--se-column-header-height']) root.style.removeProperty(name);
   }
   function refresh() {
     if (disposed) return;
